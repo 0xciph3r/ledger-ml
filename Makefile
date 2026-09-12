@@ -19,3 +19,7 @@ test: generate
 .PHONY: build
 build:
 	go build ./...
+
+.PHONY: training-test
+training-test:
+	PYTHONPATH=. python3 -m unittest discover -s training/tests -p "test_*.py"

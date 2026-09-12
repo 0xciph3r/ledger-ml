@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 3: governance and evidence foundation)
+## Current implementation status (Milestone 4: reproducible synthetic fraud training)
 
 Implemented in this milestone:
 
@@ -87,12 +87,13 @@ Implemented in this milestone:
   `TrainingFailed`, `AwaitingApproval`, `Approved`.
 - Structured audit evidence + Kubernetes Events for key decisions:
   accepted/rejected, job created, training observed/failed, approval observed.
-- Focused unit tests for API defaulting/validation, Job construction, and status mapping.
+- Real `training/` Python project with deterministic synthetic fraud data generation,
+  scikit-learn preprocessing + logistic regression training, immutable artifact output,
+  and machine-readable evaluation/lineage JSON.
+- Focused unit tests for API/controller behavior plus trainer determinism, imbalance,
+  required features, metrics output, and missing environment validation.
 
-### Current training workload contract (teaching boundary)
-
-The operator currently treats the training container image as a **contract boundary**
-for a smoke workload, not yet the real fraud model trainer.
+### Current training workload contract
 
 The Job injects these environment variables from `RiskModel.spec`:
 
@@ -111,9 +112,82 @@ The Job injects these environment variables from `RiskModel.spec`:
 The controller intentionally does **not** override container `command`/`args` in this
 milestone; the training image entrypoint defines execution behavior.
 
-This defines how trainer images should consume inputs/outputs without adding fake
-fraud logic yet. Real training implementation, metrics, and artifact integrations are
-later milestones.
+The trainer now uses this contract to generate synthetic transactions, train a real
+fraud classifier, and emit immutable outputs.
+
+## ML teaching model (synthetic fraud only)
+
+### Data-generating assumptions and label definition
+
+The synthetic generator creates transaction rows with these features:
+
+- `amount`
+- `hour`
+- `merchant_risk`
+- `distance_km`
+- `tx_count_1h`
+- `tx_count_24h`
+- `device_risk`
+
+Fraud labels are sampled from a logistic risk function with a low base rate and
+higher probability for riskier merchants/devices, high transaction velocity, long
+distance, and late-night activity. This produces intentional class imbalance and avoids
+real customer or financial data.
+
+### Why accuracy is insufficient
+
+Fraud is rare; a model can score high accuracy by predicting "not fraud" almost always.
+Ledger ML therefore records precision, recall, F1, PR-AUC, ROC-AUC, and confusion
+matrix counts (`tn`, `fp`, `fn`, `tp`) for honest quality signals.
+
+### Artifact and evaluation contract
+
+For each run, the trainer writes:
+
+- `model.joblib` (preprocessing + classifier pipeline payload)
+- `evaluation-lineage.json` with:
+  - dataset reference + version
+  - configuration digest input and computed digest
+  - feature names
+  - class balance
+  - threshold
+  - precision/recall/F1/PR-AUC/ROC-AUC
+  - confusion matrix
+  - model artifact path/version
+
+Outputs are written under:
+`<LEDGERML_OUTPUT_NAME>/<LEDGERML_OUTPUT_PATH>/<LEDGERML_OUTPUT_ARTIFACT_VERSION>/`
+
+### Local training command
+
+```bash
+python3 -m venv training/.venv
+. training/.venv/bin/activate
+pip install -r training/requirements.txt
+
+LEDGERML_TASK=fraud-scoring \
+LEDGERML_DATASET_KIND=LocalPath \
+LEDGERML_DATASET_NAME=synthetic \
+LEDGERML_DATASET_PATH=profiles/default \
+LEDGERML_DATASET_VERSION=synthetic-fraud-v1 \
+LEDGERML_OUTPUT_KIND=LocalPath \
+LEDGERML_OUTPUT_NAME=training/local-output \
+LEDGERML_OUTPUT_PATH=runs \
+LEDGERML_OUTPUT_ARTIFACT_VERSION=fraud-model-v1 \
+LEDGERML_TRAINING_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+LEDGERML_CONFIGURATION_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+LEDGERML_CLASSIFICATION_THRESHOLD=0.15 \
+PYTHONPATH=. \
+python training/train.py
+```
+
+### Docker build/run path
+
+```bash
+docker build -f training/Dockerfile -t ledger-ml-fraud-trainer:local .
+```
+
+Container execution uses the same `LEDGERML_*` contract values as above.
 
 ## Governance model (teaching scope)
 
@@ -141,9 +215,12 @@ later milestones.
 - Admission webhook enforcement is not installed yet; immutable lineage is currently
   controller-level enforcement and should be hardened with webhooks in a later milestone.
 
-Not implemented yet (later milestones): real fraud trainer behavior, drift detection,
-continuous retraining, real external data integrations, feature store, inference
-deployment, object storage/cloud integration, or cryptographic attestation.
+Not implemented yet (later milestones): drift detection, continuous retraining, real
+external data integrations, feature store, inference deployment, object storage/cloud
+integration, or cryptographic attestation.
+
+This milestone is a reproducible teaching model and governance baseline, not production
+fraud detection or regulatory certification.
 
 ## Local development prerequisites
 
@@ -161,6 +238,7 @@ make generate    # generate deepcopy methods
 make manifests   # generate CRD manifests into config/crd/bases
 make test        # run unit tests
 make build       # compile manager binary
+make training-test # run trainer unit tests (requires Python deps)
 ```
 
 ## Code structure and operator concepts

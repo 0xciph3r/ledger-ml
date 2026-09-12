@@ -5,16 +5,16 @@ metadata:
   namespace: default
 spec:
   task: fraud-scoring
-  trainingImage: ghcr.io/ledger-ml/trainer:latest
+  trainingImage: ghcr.io/ledger-ml/fraud-trainer:0.1.0
   lineage:
     trainingImageDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-    datasetVersion: synthetic-fraud-2026-09-12
+    datasetVersion: synthetic-fraud-v1
     outputArtifactVersion: fraud-model-v1
     configurationDigest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   datasetRef:
     kind: ConfigMap
-    name: fraud-training-data
-    path: data/transactions.csv
+    name: synthetic-fraud-profile
+    path: profiles/default
   outputRef:
     kind: PersistentVolumeClaim
     name: model-artifacts
