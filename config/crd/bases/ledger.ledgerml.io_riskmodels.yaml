@@ -51,6 +51,33 @@ spec:
           spec:
             description: RiskModelSpec defines the desired state of RiskModel.
             properties:
+              approvals:
+                description: Approvals are explicit human approvals observed by the
+                  controller.
+                items:
+                  description: ModelApproval captures a human approval statement.
+                  properties:
+                    approvedAt:
+                      description: ApprovedAt is the approval timestamp.
+                      format: date-time
+                      type: string
+                    approver:
+                      description: Approver is the identity of the approver (user/group
+                        alias).
+                      minLength: 1
+                      type: string
+                    comment:
+                      description: Comment is optional, non-PII approval context.
+                      type: string
+                    reference:
+                      description: Reference is an optional ticket or change request
+                        identifier.
+                      type: string
+                  required:
+                  - approvedAt
+                  - approver
+                  type: object
+                type: array
               datasetRef:
                 description: DatasetRef points to training dataset input.
                 properties:
@@ -74,6 +101,36 @@ spec:
                 - name
                 - path
                 type: object
+              lineage:
+                description: Lineage captures immutable identity (image digest, dataset
+                  version, artifact version, config digest).
+                properties:
+                  configurationDigest:
+                    description: ConfigurationDigest identifies immutable training
+                      configuration.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  datasetVersion:
+                    description: DatasetVersion identifies an immutable dataset snapshot
+                      (commit/version/object generation).
+                    minLength: 1
+                    type: string
+                  outputArtifactVersion:
+                    description: OutputArtifactVersion identifies the intended immutable
+                      artifact version.
+                    minLength: 1
+                    type: string
+                  trainingImageDigest:
+                    description: TrainingImageDigest is the immutable digest for spec.trainingImage
+                      content.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                required:
+                - configurationDigest
+                - datasetVersion
+                - outputArtifactVersion
+                - trainingImageDigest
+                type: object
               outputRef:
                 description: OutputRef points to model artifact output location.
                 properties:
@@ -95,6 +152,49 @@ spec:
                 required:
                 - name
                 - path
+                type: object
+              policy:
+                description: Policy controls resource safety and approval semantics.
+                properties:
+                  approval:
+                    description: ApprovalPolicy defines approval semantics before
+                      promotion.
+                    properties:
+                      allowedApprovers:
+                        description: AllowedApprovers limits approval identities when
+                          set.
+                        items:
+                          type: string
+                        type: array
+                      minimumApprovals:
+                        default: 1
+                        description: MinimumApprovals is the number of unique approvals
+                          required when Required is true.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      required:
+                        default: true
+                        description: Required indicates if approval is needed after
+                          successful training.
+                        type: boolean
+                    type: object
+                  resourceBounds:
+                    description: ResourceBoundsPolicy defines allowed training resources.
+                    properties:
+                      maxCPU:
+                        default: "2"
+                        description: MaxCPU is the maximum allowed CPU request/limit.
+                        type: string
+                      maxGPU:
+                        default: "0"
+                        description: MaxGPU is the maximum allowed GPU limit (`nvidia.com/gpu`).
+                        type: string
+                      maxMemory:
+                        default: 4Gi
+                        description: MaxMemory is the maximum allowed memory request/limit.
+                        type: string
+                    type: object
                 type: object
               resources:
                 description: Resources declares container resource requests/limits
@@ -186,18 +286,25 @@ spec:
                 - fraud-scoring
                 type: string
               trainingImage:
-                description: TrainingImage is the container image for the training
-                  job.
+                description: |-
+                  TrainingImage is the container image for the training job.
+                  Mutable tags are not production-safe; pair with lineage.trainingImageDigest.
                 minLength: 1
                 type: string
             required:
             - datasetRef
+            - lineage
             - outputRef
             - trainingImage
             type: object
           status:
             description: RiskModelStatus defines the observed state of RiskModel.
             properties:
+              approvedBy:
+                description: ApprovedBy lists approvers counted toward policy.
+                items:
+                  type: string
+                type: array
               conditions:
                 description: Conditions contain granular reconciliation signals.
                 items:
@@ -255,6 +362,45 @@ spec:
                   - type
                   type: object
                 type: array
+              evidence:
+                description: Evidence captures key governance decisions.
+                items:
+                  description: RiskModelEvidence records governance-relevant lifecycle
+                    decisions.
+                  properties:
+                    decision:
+                      description: Decision is a machine-readable decision name.
+                      type: string
+                    jobName:
+                      description: JobName links a decision to a training Job when
+                        applicable.
+                      type: string
+                    message:
+                      description: Message provides operator-facing context without
+                        raw transaction data.
+                      type: string
+                    observedGeneration:
+                      description: ObservedGeneration links evidence to the reconciled
+                        generation.
+                      format: int64
+                      type: integer
+                    reason:
+                      description: Reason is a short decision reason.
+                      type: string
+                    time:
+                      description: Time is when the decision was observed.
+                      format: date-time
+                      type: string
+                  required:
+                  - decision
+                  - reason
+                  - time
+                  type: object
+                type: array
+              lineageHash:
+                description: LineageHash is the controller-calculated hash of immutable
+                  identity fields.
+                type: string
               message:
                 description: Message is a human-readable explanation of the current
                   phase.

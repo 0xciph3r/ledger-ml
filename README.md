@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 2: first real training workload slice)
+## Current implementation status (Milestone 3: governance and evidence foundation)
 
 Implemented in this milestone:
 
@@ -65,18 +65,28 @@ Implemented in this milestone:
   - training image
   - dataset reference
   - model artifact/output reference
+  - immutable lineage identity (`trainingImageDigest`, dataset/output versions, config digest)
   - resource requests/limits
   - serving configuration
+  - governance policy (resource bounds + approval semantics)
+  - explicit approvals (human-supplied records)
 - `RiskModelStatus` fields for:
   - phase
   - conditions
   - observed generation
+  - lineage hash
+  - approvers counted toward policy
+  - governance evidence records
   - model version (reserved for later milestones)
   - reason/message
 - Idempotent reconciler that creates a single owned `batch/v1` training Job per
   `RiskModel` and does not recreate it on every reconcile.
-- Status mapping from Job state to training phases:
-  `TrainingPending`, `TrainingRunning`, `TrainingSucceeded`, `TrainingFailed`.
+- Policy gate before Job creation. Unsafe resource declarations are rejected with clear status/events.
+- Status mapping from Job + governance state to phases:
+  `Rejected`, `TrainingPending`, `TrainingRunning`, `TrainingSucceeded`,
+  `TrainingFailed`, `AwaitingApproval`, `Approved`.
+- Structured audit evidence + Kubernetes Events for key decisions:
+  accepted/rejected, job created, training observed/failed, approval observed.
 - Focused unit tests for API defaulting/validation, Job construction, and status mapping.
 
 ### Current training workload contract (teaching boundary)
@@ -90,9 +100,13 @@ The Job injects these environment variables from `RiskModel.spec`:
 - `LEDGERML_DATASET_KIND`
 - `LEDGERML_DATASET_NAME`
 - `LEDGERML_DATASET_PATH`
+- `LEDGERML_DATASET_VERSION`
 - `LEDGERML_OUTPUT_KIND`
 - `LEDGERML_OUTPUT_NAME`
 - `LEDGERML_OUTPUT_PATH`
+- `LEDGERML_OUTPUT_ARTIFACT_VERSION`
+- `LEDGERML_TRAINING_IMAGE_DIGEST`
+- `LEDGERML_CONFIGURATION_DIGEST`
 
 The controller intentionally does **not** override container `command`/`args` in this
 milestone; the training image entrypoint defines execution behavior.
@@ -101,9 +115,35 @@ This defines how trainer images should consume inputs/outputs without adding fak
 fraud logic yet. Real training implementation, metrics, and artifact integrations are
 later milestones.
 
-Not implemented yet (later milestones): real fraud trainer behavior, model artifact
-versioning workflow, evaluation gates, approval flow, inference deployment, or
-object storage/cloud integration.
+## Governance model (teaching scope)
+
+### Invariants enforced now
+
+1. **Immutable lineage identity**: task, training image/refs, lineage digest/version fields,
+   resource profile, serving intent, and governance policy are immutable after create.
+   New lineage => create a new `RiskModel`. This is enforced in the controller by
+   comparing persisted `status.lineageHash` to the newly computed hash before any Job action.
+2. **Resource policy gate**: requested CPU/memory and optional GPU limits must stay within
+   declared policy bounds before the controller creates a training Job.
+3. **Approval gate**: successful training does not imply production readiness.
+   The controller only marks `Approved` when explicit approval records satisfy policy.
+4. **No self-approval by controller**: approvals are read from `spec.approvals`; the
+   controller does not write approvals on your behalf.
+5. **No production-ready claim yet**: `Ready` remains false with `PromotionNotImplemented`
+   until serving/promotion milestones exist.
+
+### Evidence boundaries
+
+- Evidence records and Events capture operator decisions, reasons, and timestamps.
+- Evidence intentionally excludes raw transaction payloads, labels, or other PII.
+- This is operational governance evidence, **not** regulatory certification and **not**
+  cryptographic/non-repudiation proof yet.
+- Admission webhook enforcement is not installed yet; immutable lineage is currently
+  controller-level enforcement and should be hardened with webhooks in a later milestone.
+
+Not implemented yet (later milestones): real fraud trainer behavior, drift detection,
+continuous retraining, real external data integrations, feature store, inference
+deployment, object storage/cloud integration, or cryptographic attestation.
 
 ## Local development prerequisites
 
@@ -136,6 +176,8 @@ Teaching focus in this milestone:
 - **Idempotency**: reconcile is safe to run repeatedly and avoids duplicate Job creation.
 - **Conditions**: machine-readable readiness/progress signals for Kubernetes-native observability.
 - **Workload contract**: the operator and trainer image communicate through explicit, versionable inputs.
+- **Governance gates**: policy and approval checks block unsafe or premature progression.
+- **Auditability**: evidence and Events explain lifecycle decisions without leaking sensitive data.
 
 ## Teaching path
 

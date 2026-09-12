@@ -53,8 +53,9 @@ func main() {
 	}
 
 	if err := (&controller.RiskModelReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("riskmodel-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "unable to create controller", "controller", "RiskModel")
 		os.Exit(1)
