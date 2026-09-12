@@ -1,0 +1,21 @@
+CONTROLLER_GEN = go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.3
+
+.PHONY: fmt
+fmt:
+	go fmt ./...
+
+.PHONY: generate
+generate:
+	$(CONTROLLER_GEN) object paths="./..."
+
+.PHONY: manifests
+manifests:
+	$(CONTROLLER_GEN) crd:crdVersions=v1 paths="./api/..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: test
+test: generate
+	go test ./...
+
+.PHONY: build
+build:
+	go build ./...

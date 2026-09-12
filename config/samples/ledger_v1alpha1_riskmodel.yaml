@@ -1,0 +1,25 @@
+apiVersion: ledger.ledgerml.io/v1alpha1
+kind: RiskModel
+metadata:
+  name: fraud-risk-model
+  namespace: default
+spec:
+  task: fraud-scoring
+  trainingImage: ghcr.io/ledger-ml/trainer:latest
+  datasetRef:
+    kind: ConfigMap
+    name: fraud-training-data
+    path: data/transactions.csv
+  outputRef:
+    kind: PersistentVolumeClaim
+    name: model-artifacts
+    path: fraud/models
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  serving:
+    enabled: false
