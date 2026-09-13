@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 5: Mainhedge snapshot adapter + feature contract)
+## Current implementation status (Milestone 5: double-entry ledger snapshot adapter + feature contract)
 
 Implemented in this milestone:
 
@@ -90,7 +90,7 @@ Implemented in this milestone:
 - Real `training/` Python project with deterministic synthetic fraud data generation,
   scikit-learn preprocessing + logistic regression training, immutable artifact output,
   and machine-readable evaluation/lineage JSON.
-- Mainhedge-style sanitized ledger snapshot adapter with strict double-entry validation,
+- Sanitized double-entry ledger snapshot adapter with strict accounting validation,
   proxy-label generation, leakage guardrails, and stable transaction-level feature extraction.
 - Focused unit tests for API/controller behavior plus trainer determinism, imbalance,
   required features, metrics output, missing environment validation, and snapshot invariants.
@@ -114,7 +114,7 @@ The Job injects these environment variables from `RiskModel.spec`:
 Dataset selection is now controlled by `LEDGERML_DATASET_KIND`:
 
 - `LocalPath` (existing synthetic path)
-- `MainhedgeLedgerSnapshot` (sanitized snapshot adapter)
+- `DoubleEntryLedgerSnapshot` (sanitized snapshot adapter)
 
 The controller intentionally does **not** override container `command`/`args` in this
 milestone; the training image entrypoint defines execution behavior.
@@ -122,10 +122,10 @@ milestone; the training image entrypoint defines execution behavior.
 The trainer now uses this contract to generate synthetic transactions, train a real
 fraud classifier, and emit immutable outputs.
 
-## Mainhedge snapshot adapter (sanitized local fixture only)
+## Double-entry ledger snapshot adapter (sanitized local fixture only)
 
-Ledger ML now supports a local, sanitized snapshot that mirrors core Mainhedge schema
-shapes without copying real records:
+Ledger ML now supports a local, sanitized snapshot that represents common double-entry
+ledger schema shapes without copying real records:
 
 - `ledgers.csv`
 - `accounts.csv`
@@ -133,7 +133,7 @@ shapes without copying real records:
 - `entries.csv`
 - `reversals.csv` (optional)
 
-Reference format: `training/mainhedge_snapshot_format.md`
+Reference format: `training/double_entry_snapshot_format.md`
 
 Exact required columns:
 
@@ -245,20 +245,20 @@ PYTHONPATH=. \
 python training/train.py
 ```
 
-### Local fixture training command (Mainhedge snapshot path)
+### Local fixture training command (double-entry snapshot path)
 
 Use only sanitized fixture data:
 
 ```bash
 LEDGERML_TASK=fraud-scoring \
-LEDGERML_DATASET_KIND=MainhedgeLedgerSnapshot \
-LEDGERML_DATASET_NAME=mainhedge-sanitized-fixture \
-LEDGERML_DATASET_PATH=training/tests/fixtures/mainhedge_snapshot \
-LEDGERML_DATASET_VERSION=mainhedge-snapshot-v1 \
+LEDGERML_DATASET_KIND=DoubleEntryLedgerSnapshot \
+LEDGERML_DATASET_NAME=double-entry-sanitized-fixture \
+LEDGERML_DATASET_PATH=training/tests/fixtures/double_entry_snapshot \
+LEDGERML_DATASET_VERSION=double-entry-snapshot-v1 \
 LEDGERML_OUTPUT_KIND=LocalPath \
 LEDGERML_OUTPUT_NAME=training/local-output \
 LEDGERML_OUTPUT_PATH=runs \
-LEDGERML_OUTPUT_ARTIFACT_VERSION=mainhedge-model-v1 \
+LEDGERML_OUTPUT_ARTIFACT_VERSION=double-entry-model-v1 \
 LEDGERML_TRAINING_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
 LEDGERML_CONFIGURATION_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
 PYTHONPATH=. \
@@ -306,7 +306,7 @@ integration, or cryptographic attestation.
 This milestone is a reproducible teaching model and governance baseline, not production
 fraud detection or regulatory certification.
 
-No real Mainhedge records are committed, uploaded, or required for this repository.
+No real ledger records are committed, uploaded, or required for this repository.
 
 ## Local development prerequisites
 

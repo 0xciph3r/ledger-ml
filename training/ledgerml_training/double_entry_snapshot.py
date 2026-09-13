@@ -1,4 +1,4 @@
-"""Mainhedge-style sanitized ledger snapshot adapter.
+"""Sanitized double-entry ledger snapshot adapter.
 
 The adapter reads a local-only, sanitized snapshot that models core double-entry
 entities:
@@ -29,9 +29,9 @@ import numpy as np
 import pandas as pd
 
 
-MAINHEDGE_SNAPSHOT_SCHEMA_VERSION = "mainhedge-ledger-snapshot-v1"
+DOUBLE_ENTRY_SNAPSHOT_SCHEMA_VERSION = "double-entry-ledger-snapshot-v1"
 
-MAINHEDGE_FEATURE_NAMES = (
+DOUBLE_ENTRY_FEATURE_NAMES = (
     "total_amount_base_units",
     "entry_count",
     "debit_entry_count",
@@ -181,8 +181,8 @@ def _as_presence_flag(value: Any) -> int:
     return 1
 
 
-def load_mainhedge_snapshot(dataset_path: str) -> SnapshotDataset:
-    """Load and validate a sanitized Mainhedge-style ledger snapshot."""
+def load_double_entry_snapshot(dataset_path: str) -> SnapshotDataset:
+    """Load and validate a sanitized double-entry ledger snapshot."""
     snapshot_root = _resolve_snapshot_path(dataset_path)
     if not snapshot_root.exists():
         raise SnapshotContractError(f"Snapshot directory does not exist: {snapshot_root}")
@@ -402,14 +402,14 @@ def load_mainhedge_snapshot(dataset_path: str) -> SnapshotDataset:
     if not records:
         raise SnapshotContractError("No valid transactions found in snapshot")
 
-    features = pd.DataFrame([record["features"] for record in records], columns=list(MAINHEDGE_FEATURE_NAMES))
+    features = pd.DataFrame([record["features"] for record in records], columns=list(DOUBLE_ENTRY_FEATURE_NAMES))
     labels = np.array([int(record["proxy_label"]) for record in records], dtype=int)
 
     metadata = {
-        "schema_version": MAINHEDGE_SNAPSHOT_SCHEMA_VERSION,
+        "schema_version": DOUBLE_ENTRY_SNAPSHOT_SCHEMA_VERSION,
         "label_definition": "proxy_risk=1 if settlement_state indicates failure/reversal or reversal record exists",
         "label_caveat": "Proxy risk labels are operational outcomes, not confirmed fraud ground truth.",
-        "feature_names": list(MAINHEDGE_FEATURE_NAMES),
+        "feature_names": list(DOUBLE_ENTRY_FEATURE_NAMES),
         "transaction_ids_order": [record["transaction_id"] for record in records],
         "record_count": int(len(records)),
         "positive_label_count": int(labels.sum()),

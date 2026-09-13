@@ -3,7 +3,7 @@
 This module supports two local training data paths:
 
 1) Synthetic generator (no external records)
-2) Sanitized Mainhedge ledger snapshot adapter (double-entry contract validated)
+2) Sanitized double-entry ledger snapshot adapter (accounting contract validated)
 
 It writes:
 - immutable model artifact (`model.joblib`)
@@ -39,10 +39,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .mainhedge_snapshot import (
-    MAINHEDGE_FEATURE_NAMES,
+from .double_entry_snapshot import (
+    DOUBLE_ENTRY_FEATURE_NAMES,
     SnapshotContractError,
-    load_mainhedge_snapshot,
+    load_double_entry_snapshot,
 )
 
 
@@ -245,12 +245,12 @@ def generate_synthetic_transactions(
 
 
 def _load_dataset(config: TrainingConfig) -> TrainingDataset:
-    if config.dataset_kind == "MainhedgeLedgerSnapshot":
+    if config.dataset_kind == "DoubleEntryLedgerSnapshot":
         try:
-            snapshot = load_mainhedge_snapshot(config.dataset_path)
+            snapshot = load_double_entry_snapshot(config.dataset_path)
         except SnapshotContractError as err:
             raise ConfigurationError(
-                f"Mainhedge ledger snapshot validation failed: {err}"
+                f"Double-entry ledger snapshot validation failed: {err}"
             ) from err
         return TrainingDataset(
             features=snapshot.features,

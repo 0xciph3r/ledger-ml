@@ -1,16 +1,16 @@
-# Mainhedge Ledger Snapshot (Sanitized, Local-Only)
+# Double-Entry Ledger Snapshot (Sanitized, Local-Only)
 
 This format models a **double-entry ledger snapshot** for local Ledger ML training.
 
 ## Hard data boundary
 
-- Do **not** commit or upload real Mainhedge records.
+- Do **not** commit or upload real ledger records.
 - Use synthetic or sanitized values only.
 - Never include credentials, customer identifiers, PII, raw metadata blobs, or secrets.
 
 ## Schema version
 
-- `mainhedge-ledger-snapshot-v1`
+- `double-entry-ledger-snapshot-v1`
 
 ## Required files
 

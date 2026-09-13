@@ -3,7 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
-from training.ledgerml_training.mainhedge_snapshot import MAINHEDGE_FEATURE_NAMES
+from training.ledgerml_training.double_entry_snapshot import DOUBLE_ENTRY_FEATURE_NAMES
 from training.ledgerml_training.trainer import (
     FEATURE_NAMES,
     ConfigurationError,
@@ -99,16 +99,16 @@ class TrainerTests(unittest.TestCase):
         self.assertEqual(evaluation["dataset"]["schema_version"], "synthetic-fraud-v1")
         self.assertIn("Synthetic fraud labels", evaluation["dataset"]["label_caveat"])
 
-    def test_mainhedge_snapshot_dataset_training_metadata(self) -> None:
-        fixture_path = Path("training/tests/fixtures/mainhedge_snapshot")
+    def test_double_entry_snapshot_dataset_training_metadata(self) -> None:
+        fixture_path = Path("training/tests/fixtures/double_entry_snapshot")
         env = valid_env(self.test_dir)
         env.update(
             {
-                "LEDGERML_DATASET_KIND": "MainhedgeLedgerSnapshot",
-                "LEDGERML_DATASET_NAME": "mainhedge-sanitized-fixture",
+                "LEDGERML_DATASET_KIND": "DoubleEntryLedgerSnapshot",
+                "LEDGERML_DATASET_NAME": "double-entry-sanitized-fixture",
                 "LEDGERML_DATASET_PATH": str(fixture_path),
-                "LEDGERML_DATASET_VERSION": "mainhedge-snapshot-v1",
-                "LEDGERML_OUTPUT_ARTIFACT_VERSION": "mainhedge-model-v1",
+                "LEDGERML_DATASET_VERSION": "double-entry-snapshot-v1",
+                "LEDGERML_OUTPUT_ARTIFACT_VERSION": "double-entry-model-v1",
             }
         )
         config = load_training_config(env)
@@ -117,14 +117,14 @@ class TrainerTests(unittest.TestCase):
         with outputs["evaluation_path"].open("r", encoding="utf-8") as f:
             evaluation = json.load(f)
 
-        self.assertEqual(evaluation["dataset"]["kind"], "MainhedgeLedgerSnapshot")
+        self.assertEqual(evaluation["dataset"]["kind"], "DoubleEntryLedgerSnapshot")
         self.assertEqual(
-            evaluation["dataset"]["schema_version"], "mainhedge-ledger-snapshot-v1"
+            evaluation["dataset"]["schema_version"], "double-entry-ledger-snapshot-v1"
         )
         self.assertIn("proxy", evaluation["dataset"]["label_definition"].lower())
         self.assertIn("not confirmed fraud ground truth", evaluation["dataset"]["label_caveat"])
         self.assertEqual(
-            evaluation["lineage"]["feature_names"], list(MAINHEDGE_FEATURE_NAMES)
+            evaluation["lineage"]["feature_names"], list(DOUBLE_ENTRY_FEATURE_NAMES)
         )
 
 

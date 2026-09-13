@@ -4,19 +4,19 @@ from pathlib import Path
 
 import pandas as pd
 
-from training.ledgerml_training.mainhedge_snapshot import (
-    MAINHEDGE_FEATURE_NAMES,
+from training.ledgerml_training.double_entry_snapshot import (
+    DOUBLE_ENTRY_FEATURE_NAMES,
     SnapshotContractError,
-    load_mainhedge_snapshot,
+    load_double_entry_snapshot,
 )
 
 
-FIXTURE_ROOT = Path("training/tests/fixtures/mainhedge_snapshot")
+FIXTURE_ROOT = Path("training/tests/fixtures/double_entry_snapshot")
 
 
-class MainhedgeSnapshotTests(unittest.TestCase):
+class DoubleEntrySnapshotTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.test_root = Path("training/tests/.artifacts/mainhedge_snapshot")
+        self.test_root = Path("training/tests/.artifacts/double_entry_snapshot")
         if self.test_root.exists():
             shutil.rmtree(self.test_root)
         self.test_root.mkdir(parents=True)
@@ -32,11 +32,11 @@ class MainhedgeSnapshotTests(unittest.TestCase):
 
     def test_balanced_snapshot_loads(self) -> None:
         snapshot_path = self._copy_fixture("balanced")
-        dataset = load_mainhedge_snapshot(str(snapshot_path))
+        dataset = load_double_entry_snapshot(str(snapshot_path))
 
-        self.assertEqual(list(dataset.features.columns), list(MAINHEDGE_FEATURE_NAMES))
+        self.assertEqual(list(dataset.features.columns), list(DOUBLE_ENTRY_FEATURE_NAMES))
         self.assertEqual(len(dataset.features), 12)
-        self.assertEqual(dataset.metadata["schema_version"], "mainhedge-ledger-snapshot-v1")
+        self.assertEqual(dataset.metadata["schema_version"], "double-entry-ledger-snapshot-v1")
         self.assertEqual(dataset.metadata["transaction_ids_order"][0], "tx001")
         self.assertEqual(dataset.metadata["transaction_ids_order"][-1], "tx012")
 
@@ -47,7 +47,7 @@ class MainhedgeSnapshotTests(unittest.TestCase):
         entries.to_csv(snapshot_path / "entries.csv", index=False)
 
         with self.assertRaises(SnapshotContractError) as ctx:
-            load_mainhedge_snapshot(str(snapshot_path))
+            load_double_entry_snapshot(str(snapshot_path))
         self.assertIn("unbalanced", str(ctx.exception).lower())
 
     def test_invalid_decimal_and_negative_amounts_rejected(self) -> None:
@@ -59,11 +59,11 @@ class MainhedgeSnapshotTests(unittest.TestCase):
                 entries.to_csv(snapshot_path / "entries.csv", index=False)
 
                 with self.assertRaises(SnapshotContractError):
-                    load_mainhedge_snapshot(str(snapshot_path))
+                    load_double_entry_snapshot(str(snapshot_path))
 
     def test_proxy_labels_and_leakage_boundaries(self) -> None:
         snapshot_path = self._copy_fixture("labels")
-        dataset = load_mainhedge_snapshot(str(snapshot_path))
+        dataset = load_double_entry_snapshot(str(snapshot_path))
 
         self.assertListEqual(
             dataset.labels.tolist(),
@@ -82,7 +82,7 @@ class MainhedgeSnapshotTests(unittest.TestCase):
 
     def test_integer_money_and_temporal_velocity_features(self) -> None:
         snapshot_path = self._copy_fixture("velocity")
-        dataset = load_mainhedge_snapshot(str(snapshot_path))
+        dataset = load_double_entry_snapshot(str(snapshot_path))
 
         first_row = dataset.features.iloc[0]
         self.assertEqual(int(first_row["total_amount_base_units"]), 12500)
@@ -105,13 +105,13 @@ class MainhedgeSnapshotTests(unittest.TestCase):
         entries.to_csv(snapshot_path / "entries.csv", index=False)
 
         with self.assertRaises(SnapshotContractError) as ctx:
-            load_mainhedge_snapshot(str(snapshot_path))
+            load_double_entry_snapshot(str(snapshot_path))
         self.assertIn("currency", str(ctx.exception).lower())
 
     def test_deterministic_feature_extraction(self) -> None:
         snapshot_path = self._copy_fixture("deterministic")
-        dataset_a = load_mainhedge_snapshot(str(snapshot_path))
-        dataset_b = load_mainhedge_snapshot(str(snapshot_path))
+        dataset_a = load_double_entry_snapshot(str(snapshot_path))
+        dataset_b = load_double_entry_snapshot(str(snapshot_path))
 
         self.assertTrue(dataset_a.features.equals(dataset_b.features))
         self.assertListEqual(dataset_a.labels.tolist(), dataset_b.labels.tolist())
