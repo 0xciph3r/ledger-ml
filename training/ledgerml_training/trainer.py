@@ -1,16 +1,13 @@
-"""Synthetic fraud trainer for Ledger ML.
+"""Ledger ML fraud-risk trainer.
 
-This module implements a deterministic, local-only fraud model training slice for the
-teaching milestones. It uses synthetic transaction data and a small logistic
-regression pipeline to produce:
+This module supports two local training data paths:
 
-1) an immutable model artifact (`model.joblib`)
-2) an evaluation + lineage JSON record (`evaluation-lineage.json`)
+1) Synthetic generator (no external records)
+2) Sanitized Mainhedge ledger snapshot adapter (double-entry contract validated)
 
-Why not accuracy-only:
-Fraud detection is intentionally imbalanced, so a model can show high accuracy while
-missing most fraud. We therefore report precision, recall, F1, PR-AUC, ROC-AUC, and
-confusion matrix counts.
+It writes:
+- immutable model artifact (`model.joblib`)
+- machine-readable evaluation/lineage record (`evaluation-lineage.json`)
 """
 
 from __future__ import annotations
@@ -23,7 +20,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import joblib
 import numpy as np
@@ -42,8 +39,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .mainhedge_snapshot import (
+    MAINHEDGE_FEATURE_NAMES,
+    SnapshotContractError,
+    load_mainhedge_snapshot,
+)
 
-FEATURE_NAMES: Sequence[str] = (
+
+SYNTHETIC_FEATURE_NAMES: Sequence[str] = (
     "amount",
     "hour",
     "merchant_risk",
@@ -52,6 +55,9 @@ FEATURE_NAMES: Sequence[str] = (
     "tx_count_24h",
     "device_risk",
 )
+
+# Backward-compatible alias for existing imports/tests.
+FEATURE_NAMES = SYNTHETIC_FEATURE_NAMES
 
 REQUIRED_ENV_VARS: Sequence[str] = (
     "LEDGERML_TASK",
@@ -102,6 +108,13 @@ class TrainingConfig:
         if relative_path:
             base = base / relative_path
         return base / self.output_artifact_version
+
+
+@dataclasses.dataclass(frozen=True)
+class TrainingDataset:
+    features: pd.DataFrame
+    labels: np.ndarray
+    metadata: dict[str, Any]
 
 
 def _require_env(env: Mapping[str, str], key: str) -> str:
@@ -168,7 +181,9 @@ def load_training_config(env: Mapping[str, str]) -> TrainingConfig:
     return config
 
 
-def generate_synthetic_transactions(config: TrainingConfig) -> tuple[pd.DataFrame, np.ndarray, dict[str, str]]:
+def generate_synthetic_transactions(
+    config: TrainingConfig,
+) -> tuple[pd.DataFrame, np.ndarray, dict[str, Any]]:
     """Generate deterministic synthetic transaction data.
 
     Assumptions:
@@ -212,15 +227,49 @@ def generate_synthetic_transactions(config: TrainingConfig) -> tuple[pd.DataFram
             "tx_count_1h": tx_count_1h.astype(float),
             "tx_count_24h": tx_count_24h.astype(float),
             "device_risk": device_risk.astype(float),
-        }
+        },
+        columns=list(SYNTHETIC_FEATURE_NAMES),
     )
 
-    assumptions = {
-        "label_definition": "fraud = Bernoulli(sigmoid(weighted risk score over synthetic features))",
-        "imbalance_design": "intercept and coefficients chosen so fraud prevalence remains low but non-trivial",
-        "privacy": "synthetic-only data; no customer PII or real transactions",
+    metadata = {
+        "schema_version": "synthetic-fraud-v1",
+        "label_definition": "synthetic_fraud = Bernoulli(sigmoid(weighted risk score over synthetic features))",
+        "label_caveat": "Synthetic fraud labels are simulated outcomes, not real-world fraud ground truth.",
+        "feature_names": list(SYNTHETIC_FEATURE_NAMES),
+        "assumptions": {
+            "imbalance_design": "intercept and coefficients chosen so fraud prevalence remains low but non-trivial",
+            "privacy": "synthetic-only data; no customer PII or real transactions",
+        },
     }
-    return features, labels.astype(int), assumptions
+    return features, labels.astype(int), metadata
+
+
+def _load_dataset(config: TrainingConfig) -> TrainingDataset:
+    if config.dataset_kind == "MainhedgeLedgerSnapshot":
+        try:
+            snapshot = load_mainhedge_snapshot(config.dataset_path)
+        except SnapshotContractError as err:
+            raise ConfigurationError(
+                f"Mainhedge ledger snapshot validation failed: {err}"
+            ) from err
+        return TrainingDataset(
+            features=snapshot.features,
+            labels=snapshot.labels,
+            metadata=snapshot.metadata,
+        )
+
+    features, labels, metadata = generate_synthetic_transactions(config)
+    metadata.setdefault("schema_version", "synthetic-fraud-v1")
+    metadata.setdefault("feature_names", list(SYNTHETIC_FEATURE_NAMES))
+    metadata.setdefault(
+        "label_definition",
+        "synthetic_fraud = Bernoulli(sigmoid(weighted risk score over synthetic features))",
+    )
+    metadata.setdefault(
+        "label_caveat",
+        "Synthetic fraud labels are simulated outcomes, not real-world fraud ground truth.",
+    )
+    return TrainingDataset(features=features, labels=labels, metadata=metadata)
 
 
 def _build_pipeline(config: TrainingConfig) -> Pipeline:
@@ -271,11 +320,34 @@ def run_training(config: TrainingConfig) -> dict[str, Path]:
     """Train and emit immutable artifact + machine-readable evaluation output."""
     config.artifact_root.mkdir(parents=True, exist_ok=True)
 
-    features, labels, assumptions = generate_synthetic_transactions(config)
-    fraud_rate = float(labels.mean())
-    if fraud_rate <= 0.0 or fraud_rate >= 0.5:
+    dataset = _load_dataset(config)
+    features = dataset.features
+    labels = dataset.labels
+    metadata = dataset.metadata
+
+    if len(features) != len(labels):
         raise RuntimeError(
-            f"Synthetic class balance is out of expected range for fraud detection: fraud_rate={fraud_rate:.4f}"
+            f"Feature/label row mismatch: {len(features)} feature rows vs {len(labels)} labels"
+        )
+    if len(features) < 10:
+        raise RuntimeError(
+            "Dataset too small for this teaching slice; need at least 10 transactions/rows."
+        )
+
+    unique_labels, label_counts = np.unique(labels, return_counts=True)
+    if len(unique_labels) < 2:
+        raise RuntimeError(
+            "Dataset contains a single class; cannot train/evaluate classifier meaningfully."
+        )
+    if np.min(label_counts) < 2:
+        raise RuntimeError(
+            "Each class must have at least 2 rows to support stratified train/test split."
+        )
+
+    positive_rate = float(labels.mean())
+    if positive_rate <= 0.0 or positive_rate >= 0.5:
+        raise RuntimeError(
+            f"Class balance out of expected fraud-risk range: positive_rate={positive_rate:.4f}"
         )
 
     train_features, test_features, train_labels, test_labels = train_test_split(
@@ -300,13 +372,15 @@ def run_training(config: TrainingConfig) -> dict[str, Path]:
     cm = confusion_matrix(test_labels, predictions, labels=[0, 1])
     tn, fp, fn, tp = (int(cm[0, 0]), int(cm[0, 1]), int(cm[1, 0]), int(cm[1, 1]))
 
+    feature_names = list(metadata.get("feature_names", list(features.columns)))
     model_path = config.artifact_root / "model.joblib"
     evaluation_path = config.artifact_root / "evaluation-lineage.json"
 
     model_payload = {
         "pipeline": pipeline,
-        "feature_names": list(FEATURE_NAMES),
+        "feature_names": feature_names,
         "threshold": config.threshold,
+        "dataset_kind": config.dataset_kind,
         "dataset_version": config.dataset_version,
         "output_artifact_version": config.output_artifact_version,
     }
@@ -321,8 +395,10 @@ def run_training(config: TrainingConfig) -> dict[str, Path]:
             "name": config.dataset_name,
             "path": config.dataset_path,
             "version": config.dataset_version,
-            "generator": "ledgerml-synthetic-fraud-v1",
-            "assumptions": assumptions,
+            "schema_version": metadata.get("schema_version", "unknown"),
+            "label_definition": metadata.get("label_definition", "unspecified"),
+            "label_caveat": metadata.get("label_caveat", ""),
+            "assumptions": metadata.get("assumptions", {}),
         },
         "lineage": {
             "training_image_digest": config.training_image_digest,
@@ -336,13 +412,13 @@ def run_training(config: TrainingConfig) -> dict[str, Path]:
                 "artifact_version": config.output_artifact_version,
             },
             "model_artifact_path": str(model_path),
-            "feature_names": list(FEATURE_NAMES),
+            "feature_names": feature_names,
         },
         "class_balance": {
-            "total_samples": int(config.num_samples),
-            "fraud_count": int(labels.sum()),
-            "non_fraud_count": int((labels == 0).sum()),
-            "fraud_rate": fraud_rate,
+            "total_samples": int(len(labels)),
+            "positive_count": int(labels.sum()),
+            "negative_count": int((labels == 0).sum()),
+            "positive_rate": positive_rate,
         },
         "threshold": config.threshold,
         "metrics": {
@@ -390,7 +466,12 @@ def run_cli(env: Mapping[str, str] | None = None) -> int:
         print(f"Configuration error: {err}", file=sys.stderr)
         return 2
 
-    outputs = run_training(config)
+    try:
+        outputs = run_training(config)
+    except (ConfigurationError, RuntimeError, ValueError) as err:
+        print(f"Training failed: {err}", file=sys.stderr)
+        return 3
+
     print(f"Training completed. Model artifact: {outputs['model_artifact_path']}")
     print(f"Evaluation record: {outputs['evaluation_path']}")
     return 0

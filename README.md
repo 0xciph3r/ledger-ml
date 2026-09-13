@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 4: reproducible synthetic fraud training)
+## Current implementation status (Milestone 5: Mainhedge snapshot adapter + feature contract)
 
 Implemented in this milestone:
 
@@ -90,8 +90,10 @@ Implemented in this milestone:
 - Real `training/` Python project with deterministic synthetic fraud data generation,
   scikit-learn preprocessing + logistic regression training, immutable artifact output,
   and machine-readable evaluation/lineage JSON.
+- Mainhedge-style sanitized ledger snapshot adapter with strict double-entry validation,
+  proxy-label generation, leakage guardrails, and stable transaction-level feature extraction.
 - Focused unit tests for API/controller behavior plus trainer determinism, imbalance,
-  required features, metrics output, and missing environment validation.
+  required features, metrics output, missing environment validation, and snapshot invariants.
 
 ### Current training workload contract
 
@@ -109,11 +111,73 @@ The Job injects these environment variables from `RiskModel.spec`:
 - `LEDGERML_TRAINING_IMAGE_DIGEST`
 - `LEDGERML_CONFIGURATION_DIGEST`
 
+Dataset selection is now controlled by `LEDGERML_DATASET_KIND`:
+
+- `LocalPath` (existing synthetic path)
+- `MainhedgeLedgerSnapshot` (sanitized snapshot adapter)
+
 The controller intentionally does **not** override container `command`/`args` in this
 milestone; the training image entrypoint defines execution behavior.
 
 The trainer now uses this contract to generate synthetic transactions, train a real
 fraud classifier, and emit immutable outputs.
+
+## Mainhedge snapshot adapter (sanitized local fixture only)
+
+Ledger ML now supports a local, sanitized snapshot that mirrors core Mainhedge schema
+shapes without copying real records:
+
+- `ledgers.csv`
+- `accounts.csv`
+- `transactions.csv`
+- `entries.csv`
+- `reversals.csv` (optional)
+
+Reference format: `training/mainhedge_snapshot_format.md`
+
+Exact required columns:
+
+- `ledgers.csv`: `ledger_id,currency`
+- `accounts.csv`: `account_id,ledger_id,account_type,currency`
+- `transactions.csv`: `transaction_id,ledger_id,transaction_type,created_at,currency,settlement_state,session_reference,external_reference`
+- `entries.csv`: `entry_id,transaction_id,account_id,entry_type,amount_base_units,currency`
+- `reversals.csv` (optional): `reversal_id,transaction_id,reversed_at,reason_code`
+
+### Table mapping and integrity model
+
+- `ledgers` + `accounts` define account and currency context.
+- `transactions` provides event headers and timestamps.
+- `entries` provides debit/credit postings in **integer base units**.
+- `reversals` and settlement outcomes provide operational proxy labels.
+
+Double-entry validations enforced before feature extraction:
+
+- at least two entries per transaction
+- positive integer base-unit amounts (no decimal money math)
+- debit total equals credit total
+- single currency per transaction and currency consistency across ledger/account/entry
+
+Invalid snapshots fail fast with explicit errors.
+
+### Proxy labels and leakage boundary
+
+- Label is `1` for failed/reversed outcomes or explicit reversal markers.
+- This is an **operational risk proxy**, not confirmed fraud ground truth.
+- Outcome fields (settlement state, reversal markers, post-transaction status) are
+  intentionally excluded from model feature columns.
+
+### Feature contract (stable names)
+
+Snapshot training emits stable transaction-level features including:
+
+- total amount in base units
+- entry/debit/credit counts
+- debit/credit account-type composition
+- unique account count
+- prior-account velocity counts (1h and 24h windows using only prior timestamps)
+- hour/day/weekend features
+- safe presence indicators for session/external references
+- transaction-type indicators
 
 ## ML teaching model (synthetic fraud only)
 
@@ -181,6 +245,26 @@ PYTHONPATH=. \
 python training/train.py
 ```
 
+### Local fixture training command (Mainhedge snapshot path)
+
+Use only sanitized fixture data:
+
+```bash
+LEDGERML_TASK=fraud-scoring \
+LEDGERML_DATASET_KIND=MainhedgeLedgerSnapshot \
+LEDGERML_DATASET_NAME=mainhedge-sanitized-fixture \
+LEDGERML_DATASET_PATH=training/tests/fixtures/mainhedge_snapshot \
+LEDGERML_DATASET_VERSION=mainhedge-snapshot-v1 \
+LEDGERML_OUTPUT_KIND=LocalPath \
+LEDGERML_OUTPUT_NAME=training/local-output \
+LEDGERML_OUTPUT_PATH=runs \
+LEDGERML_OUTPUT_ARTIFACT_VERSION=mainhedge-model-v1 \
+LEDGERML_TRAINING_IMAGE_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+LEDGERML_CONFIGURATION_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+PYTHONPATH=. \
+python training/train.py
+```
+
 ### Docker build/run path
 
 ```bash
@@ -222,6 +306,8 @@ integration, or cryptographic attestation.
 This milestone is a reproducible teaching model and governance baseline, not production
 fraud detection or regulatory certification.
 
+No real Mainhedge records are committed, uploaded, or required for this repository.
+
 ## Local development prerequisites
 
 - Go 1.26+
@@ -256,6 +342,9 @@ Teaching focus in this milestone:
 - **Workload contract**: the operator and trainer image communicate through explicit, versionable inputs.
 - **Governance gates**: policy and approval checks block unsafe or premature progression.
 - **Auditability**: evidence and Events explain lifecycle decisions without leaking sensitive data.
+- **Double-entry integrity**: accounting constraints become ML data-quality guarantees.
+- **Leakage prevention**: proxy-label outcome fields are excluded from model features.
+- **Temporal construction**: velocity features depend only on prior events.
 
 ## Teaching path
 

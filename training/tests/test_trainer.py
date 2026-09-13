@@ -3,6 +3,7 @@ import shutil
 import unittest
 from pathlib import Path
 
+from training.ledgerml_training.mainhedge_snapshot import MAINHEDGE_FEATURE_NAMES
 from training.ledgerml_training.trainer import (
     FEATURE_NAMES,
     ConfigurationError,
@@ -94,6 +95,37 @@ class TrainerTests(unittest.TestCase):
             self.assertGreaterEqual(int(confusion[key]), 0)
 
         self.assertEqual(evaluation["lineage"]["feature_names"], list(FEATURE_NAMES))
+        self.assertEqual(evaluation["dataset"]["kind"], "LocalPath")
+        self.assertEqual(evaluation["dataset"]["schema_version"], "synthetic-fraud-v1")
+        self.assertIn("Synthetic fraud labels", evaluation["dataset"]["label_caveat"])
+
+    def test_mainhedge_snapshot_dataset_training_metadata(self) -> None:
+        fixture_path = Path("training/tests/fixtures/mainhedge_snapshot")
+        env = valid_env(self.test_dir)
+        env.update(
+            {
+                "LEDGERML_DATASET_KIND": "MainhedgeLedgerSnapshot",
+                "LEDGERML_DATASET_NAME": "mainhedge-sanitized-fixture",
+                "LEDGERML_DATASET_PATH": str(fixture_path),
+                "LEDGERML_DATASET_VERSION": "mainhedge-snapshot-v1",
+                "LEDGERML_OUTPUT_ARTIFACT_VERSION": "mainhedge-model-v1",
+            }
+        )
+        config = load_training_config(env)
+        outputs = run_training(config)
+
+        with outputs["evaluation_path"].open("r", encoding="utf-8") as f:
+            evaluation = json.load(f)
+
+        self.assertEqual(evaluation["dataset"]["kind"], "MainhedgeLedgerSnapshot")
+        self.assertEqual(
+            evaluation["dataset"]["schema_version"], "mainhedge-ledger-snapshot-v1"
+        )
+        self.assertIn("proxy", evaluation["dataset"]["label_definition"].lower())
+        self.assertIn("not confirmed fraud ground truth", evaluation["dataset"]["label_caveat"])
+        self.assertEqual(
+            evaluation["lineage"]["feature_names"], list(MAINHEDGE_FEATURE_NAMES)
+        )
 
 
 if __name__ == "__main__":

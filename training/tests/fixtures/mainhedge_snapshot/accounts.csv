@@ -1,0 +1,5 @@
+account_id,ledger_id,account_type,currency
+acc_cash,ledger_sandbox_usd,asset,USD
+acc_card_clearing,ledger_sandbox_usd,liability,USD
+acc_fee_revenue,ledger_sandbox_usd,revenue,USD
+acc_ops_expense,ledger_sandbox_usd,expense,USD

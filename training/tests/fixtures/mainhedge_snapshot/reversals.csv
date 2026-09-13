@@ -1,0 +1,3 @@
+reversal_id,transaction_id,reversed_at,reason_code
+rev001,tx007,2026-01-01T12:10:00Z,chargeback_reversal
+rev002,tx012,2026-01-01T14:05:00Z,settlement_reversal

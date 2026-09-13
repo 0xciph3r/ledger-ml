@@ -1,0 +1,13 @@
+transaction_id,ledger_id,transaction_type,created_at,currency,settlement_state,session_reference,external_reference
+tx001,ledger_sandbox_usd,card_payment,2026-01-01T09:00:00Z,USD,settled,sess-001,ext-001
+tx002,ledger_sandbox_usd,bank_transfer,2026-01-01T09:20:00Z,USD,settled,,ext-002
+tx003,ledger_sandbox_usd,fee,2026-01-01T10:00:00Z,USD,settled,,
+tx004,ledger_sandbox_usd,cash_withdrawal,2026-01-01T10:30:00Z,USD,failed,sess-004,
+tx005,ledger_sandbox_usd,card_payment,2026-01-01T11:10:00Z,USD,settled,sess-005,ext-005
+tx006,ledger_sandbox_usd,adjustment,2026-01-01T11:45:00Z,USD,settled,,ext-006
+tx007,ledger_sandbox_usd,card_payment,2026-01-01T12:00:00Z,USD,reversed,sess-007,ext-007
+tx008,ledger_sandbox_usd,bank_transfer,2026-01-01T12:20:00Z,USD,settled,,ext-008
+tx009,ledger_sandbox_usd,card_payment,2026-01-01T12:50:00Z,USD,settled,sess-009,ext-009
+tx010,ledger_sandbox_usd,fee,2026-01-01T13:10:00Z,USD,settled,,ext-010
+tx011,ledger_sandbox_usd,cash_withdrawal,2026-01-01T13:40:00Z,USD,settled,sess-011,
+tx012,ledger_sandbox_usd,bank_transfer,2026-01-01T14:00:00Z,USD,settled,,ext-012
