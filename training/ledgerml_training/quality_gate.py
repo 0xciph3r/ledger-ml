@@ -5,8 +5,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
+
+try:
+    from ledgerml_artifacts.store import artifact_store_from_env
+except ModuleNotFoundError:
+    from artifacts.ledgerml_artifacts.store import artifact_store_from_env
 
 
 class EvaluationGateError(ValueError):
@@ -95,9 +101,22 @@ def main() -> None:
     parser.add_argument("--max-false-negatives", type=int, default=int(os.environ.get("LEDGERML_EVALUATION_MAX_FALSE_NEGATIVES", "0")))
     args = parser.parse_args()
 
+    evaluation_path = args.evaluation_path
+    if os.environ.get("LEDGERML_OUTPUT_KIND") == "ObjectStore":
+        temporary_file = tempfile.NamedTemporaryFile(prefix="ledgerml-evaluation-", suffix=".json", delete=False)
+        temporary_path = temporary_file.name
+        temporary_file.close()
+        store = artifact_store_from_env()
+        key = store.key(
+            os.environ["LEDGERML_OUTPUT_PATH"],
+            os.environ["LEDGERML_OUTPUT_ARTIFACT_VERSION"],
+            "evaluation-lineage.json",
+        )
+        store.download_file(key, temporary_path)
+        evaluation_path = temporary_path
     try:
         result = evaluate_quality_gate(
-            args.evaluation_path,
+            evaluation_path,
             min_recall=args.min_recall,
             min_pr_auc=args.min_pr_auc,
             max_false_negatives=args.max_false_negatives,

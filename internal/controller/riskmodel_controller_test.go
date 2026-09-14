@@ -198,6 +198,52 @@ func TestEvaluationJobCarriesQualityGatesAndArtifactLineage(t *testing.T) {
 	}
 }
 
+func TestArtifactWorkloadContractsAreTableDriven(t *testing.T) {
+	cases := []struct {
+		name          string
+		kind          string
+		wantMounts    int
+		wantVolumes   int
+		wantModelPath string
+	}{
+		{
+			name:          "persistent volume claim",
+			kind:          "PersistentVolumeClaim",
+			wantMounts:    1,
+			wantVolumes:   1,
+			wantModelPath: "/mnt/model-artifacts/fraud/v1/model-v1/model.joblib",
+		},
+		{
+			name:          "s3 compatible object store",
+			kind:          "ObjectStore",
+			wantMounts:    0,
+			wantVolumes:   0,
+			wantModelPath: "fraud/v1/model-v1/model.joblib",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := validRiskModel()
+			model.Spec.OutputRef.Kind = tc.kind
+			deployment := buildShadowDeployment(model)
+			container := deployment.Spec.Template.Spec.Containers[0]
+			if len(container.VolumeMounts) != tc.wantMounts {
+				t.Fatalf("expected %d volume mounts, got %#v", tc.wantMounts, container.VolumeMounts)
+			}
+			if len(deployment.Spec.Template.Spec.Volumes) != tc.wantVolumes {
+				t.Fatalf("expected %d volumes, got %#v", tc.wantVolumes, deployment.Spec.Template.Spec.Volumes)
+			}
+			env := map[string]string{}
+			for _, entry := range container.Env {
+				env[entry.Name] = entry.Value
+			}
+			if env[envModelPath] != tc.wantModelPath {
+				t.Fatalf("expected model path %q, got %q", tc.wantModelPath, env[envModelPath])
+			}
+		})
+	}
+}
+
 func TestDriftCronJobUsesVersionedBaselineAndThresholdContract(t *testing.T) {
 	cases := []struct {
 		name       string

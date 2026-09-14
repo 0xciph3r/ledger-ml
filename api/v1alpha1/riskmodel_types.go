@@ -166,6 +166,10 @@ type ArtifactReference struct {
 	// Path is the output key/path prefix.
 	// +kubebuilder:validation:MinLength=1
 	Path string `json:"path"`
+	// EndpointURL optionally overrides the S3-compatible endpoint.
+	EndpointURL string `json:"endpointURL,omitempty"`
+	// Region optionally overrides the object-store region.
+	Region string `json:"region,omitempty"`
 }
 
 // ServingConfig captures runtime-serving intent for later milestones.
@@ -558,9 +562,6 @@ func (r *RiskModel) validateErrorList() field.ErrorList {
 
 	if r.Spec.Serving.Enabled && strings.TrimSpace(r.Spec.Serving.Image) == "" {
 		allErrs = append(allErrs, field.Required(specPath.Child("serving", "image"), "serving.image is required when serving.enabled=true"))
-	}
-	if r.Spec.Serving.Enabled && r.Spec.OutputRef.Kind != "PersistentVolumeClaim" {
-		allErrs = append(allErrs, field.NotSupported(specPath.Child("outputRef", "kind"), r.Spec.OutputRef.Kind, []string{"PersistentVolumeClaim"}))
 	}
 	if r.Spec.Serving.Mode != "Shadow" && r.Spec.Serving.Mode != "Canary" {
 		allErrs = append(allErrs, field.NotSupported(specPath.Child("serving", "mode"), r.Spec.Serving.Mode, []string{"Shadow", "Canary"}))

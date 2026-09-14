@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import tempfile
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +13,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pandas as pd
+
+try:
+    from ledgerml_artifacts.store import artifact_store_from_env
+except ModuleNotFoundError:
+    from artifacts.ledgerml_artifacts.store import artifact_store_from_env
 
 
 class InferenceError(ValueError):
@@ -168,6 +174,15 @@ def main() -> None:
     model_version = os.environ["LEDGERML_OUTPUT_ARTIFACT_VERSION"]
     lineage_hash = os.environ["LEDGERML_LINEAGE_HASH"]
     port = int(os.environ.get("PORT", "8080"))
+    if os.environ.get("LEDGERML_OUTPUT_KIND") == "ObjectStore":
+        artifact_path = tempfile.mktemp(prefix="ledgerml-model-", suffix=".joblib")
+        store = artifact_store_from_env()
+        key = store.key(
+            os.environ["LEDGERML_OUTPUT_PATH"],
+            model_version,
+            "model.joblib",
+        )
+        store.download_file(key, artifact_path)
     engine = InferenceEngine.from_artifact(
         artifact_path,
         model_version=model_version,

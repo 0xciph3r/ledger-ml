@@ -44,6 +44,10 @@ from .double_entry_snapshot import (
     SnapshotContractError,
     load_double_entry_snapshot,
 )
+try:
+    from ledgerml_artifacts.store import artifact_store_from_env
+except ModuleNotFoundError:
+    from artifacts.ledgerml_artifacts.store import artifact_store_from_env
 
 
 SYNTHETIC_FEATURE_NAMES: Sequence[str] = (
@@ -102,6 +106,8 @@ class TrainingConfig:
     def artifact_root(self) -> Path:
         """Directory where output artifacts are written."""
         base = Path(self.output_name).expanduser()
+        if self.output_kind == "ObjectStore":
+            base = Path("/tmp/ledgerml-artifacts")
         if not base.is_absolute():
             base = Path.cwd() / base
         relative_path = self.output_path.strip("/")
@@ -446,10 +452,17 @@ def run_training(config: TrainingConfig) -> dict[str, Path]:
             "sklearn_version": sklearn.__version__,
         },
     }
-
     with evaluation_path.open("w", encoding="utf-8") as f:
         json.dump(evaluation, f, indent=2, sort_keys=True)
         f.write("\n")
+
+    if config.output_kind == "ObjectStore":
+        store = artifact_store_from_env()
+        store.upload_file(model_path, store.key(config.output_path, config.output_artifact_version, "model.joblib"))
+        store.upload_file(
+            evaluation_path,
+            store.key(config.output_path, config.output_artifact_version, "evaluation-lineage.json"),
+        )
 
     return {
         "model_artifact_path": model_path,

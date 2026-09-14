@@ -219,9 +219,16 @@ The current runnable artifact adapter uses a Kubernetes `PersistentVolumeClaim`.
 Training, evaluation, and serving workloads mount `spec.outputRef.name` at
 `/mnt/model-artifacts`. Training writes the versioned model and evaluation evidence
 under `spec.outputRef.path`; evaluation reads that evidence from the same mount; and
-serving loads `model.joblib` from the promoted artifact version. `ObjectStore` remains
-an API option for a future adapter and is rejected when serving is enabled until that
-adapter exists.
+serving loads `model.joblib` from the promoted artifact version. For `ObjectStore`,
+the same paths are immutable S3 keys and workloads use the S3-compatible adapter
+instead of a volume mount.
+
+The object-store contract uses `spec.outputRef.name` as the bucket and builds keys as
+`<outputRef.path>/<artifactVersion>/<filename>`. Workloads use ambient AWS credentials
+(IRSA, workload identity, node credentials, or injected Kubernetes Secret-backed
+environment variables). S3-compatible endpoints can be supplied with
+`LEDGERML_S3_ENDPOINT_URL` or `AWS_ENDPOINT_URL`; AWS S3 uses the default region and
+endpoint behavior.
 
 ## Drift detection foundation
 
@@ -481,9 +488,8 @@ Container execution uses the same `LEDGERML_*` contract values as above.
 - Admission webhook enforcement is not installed yet; immutable lineage is currently
   controller-level enforcement and should be hardened with webhooks in a later milestone.
 
-Not implemented yet (later milestones): drift detection, continuous retraining, real
-external data integrations, feature store, GPU serving, object storage/cloud
-integration, or cryptographic attestation.
+Not implemented yet (later milestones): continuous retraining, real external data
+integrations, feature store, GPU serving, or cryptographic attestation.
 
 This milestone is a reproducible teaching model and governance baseline, not production
 fraud detection or regulatory certification.

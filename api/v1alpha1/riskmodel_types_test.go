@@ -98,7 +98,7 @@ func TestRiskModelServingArtifactKindsAreTableDriven(t *testing.T) {
 		wantError  bool
 	}{
 		{name: "PVC is supported locally", outputKind: "PersistentVolumeClaim", wantError: false},
-		{name: "object store requires adapter", outputKind: "ObjectStore", wantError: true},
+		{name: "object store is supported", outputKind: "ObjectStore", wantError: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

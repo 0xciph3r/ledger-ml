@@ -436,6 +436,10 @@ spec:
               outputRef:
                 description: OutputRef points to model artifact output location.
                 properties:
+                  endpointURL:
+                    description: EndpointURL optionally overrides the S3-compatible
+                      endpoint.
+                    type: string
                   kind:
                     default: PersistentVolumeClaim
                     description: Kind identifies the output backend.
@@ -450,6 +454,9 @@ spec:
                   path:
                     description: Path is the output key/path prefix.
                     minLength: 1
+                    type: string
+                  region:
+                    description: Region optionally overrides the object-store region.
                     type: string
                 required:
                 - name
