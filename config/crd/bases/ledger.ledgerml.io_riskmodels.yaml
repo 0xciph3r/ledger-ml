@@ -101,6 +101,256 @@ spec:
                 - name
                 - path
                 type: object
+              driftMonitoring:
+                description: DriftMonitoring optionally schedules runtime drift checks
+                  after promotion.
+                properties:
+                  baselineRef:
+                    description: BaselineRef points to the immutable training baseline
+                      JSON.
+                    properties:
+                      kind:
+                        default: ConfigMap
+                        description: Kind identifies how the dataset should be resolved.
+                        enum:
+                        - ConfigMap
+                        - PersistentVolumeClaim
+                        - ObjectStore
+                        type: string
+                      name:
+                        description: Name is the resource/bucket identifier.
+                        minLength: 1
+                        type: string
+                      path:
+                        description: Path is the key/path inside the dataset source.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - path
+                    type: object
+                  currentFeaturesRef:
+                    description: CurrentFeaturesRef points to the current feature
+                      window location.
+                    properties:
+                      kind:
+                        default: ConfigMap
+                        description: Kind identifies how the dataset should be resolved.
+                        enum:
+                        - ConfigMap
+                        - PersistentVolumeClaim
+                        - ObjectStore
+                        type: string
+                      name:
+                        description: Name is the resource/bucket identifier.
+                        minLength: 1
+                        type: string
+                      path:
+                        description: Path is the key/path inside the dataset source.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - path
+                    type: object
+                  enabled:
+                    description: Enabled controls whether drift monitoring is scheduled.
+                    type: boolean
+                  image:
+                    description: Image is the immutable drift detector workload image.
+                    type: string
+                  missingRateDeltaBPS:
+                    description: MissingRateDeltaBPS is the missing-rate delta threshold
+                      in basis points.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  psiThresholdBPS:
+                    description: PSIThresholdBPS is the PSI alert threshold in basis
+                      points.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  reportRef:
+                    description: ReportRef points to the ConfigMap containing the
+                      latest detector report.
+                    properties:
+                      kind:
+                        default: ConfigMap
+                        description: Kind identifies how the dataset should be resolved.
+                        enum:
+                        - ConfigMap
+                        - PersistentVolumeClaim
+                        - ObjectStore
+                        type: string
+                      name:
+                        description: Name is the resource/bucket identifier.
+                        minLength: 1
+                        type: string
+                      path:
+                        description: Path is the key/path inside the dataset source.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - path
+                    type: object
+                  resources:
+                    description: Resources declares resources for the detector workload.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  schedule:
+                    description: Schedule is a Kubernetes CronJob schedule.
+                    type: string
+                type: object
+              evaluation:
+                description: Evaluation optionally gates approval on measurable model
+                  quality.
+                properties:
+                  enabled:
+                    description: Enabled controls whether an evaluator Job must pass
+                      before approval.
+                    type: boolean
+                  image:
+                    description: Image is the immutable evaluator workload image.
+                    type: string
+                  maxFalseNegatives:
+                    description: MaxFalseNegatives is the maximum allowed false-negative
+                      count. Zero disables the gate.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  minPRAUCBPS:
+                    description: |-
+                      MinPRAUCBPS is the minimum required PR-AUC in basis points (0-10000).
+                      Zero disables the gate.
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
+                    type: integer
+                  minRecallBPS:
+                    description: |-
+                      MinRecallBPS is the minimum required recall in basis points (0-10000).
+                      Zero disables the gate.
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
+                    type: integer
+                  resources:
+                    description: Resources declares resources for the evaluator workload.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                type: object
               lineage:
                 description: Lineage captures immutable identity (image digest, dataset
                   version, artifact version, config digest).
@@ -120,6 +370,10 @@ spec:
                       artifact version.
                     minLength: 1
                     type: string
+                  preparedDatasetVersion:
+                    description: PreparedDatasetVersion identifies the immutable curated
+                      dataset produced by preparation.
+                    type: string
                   trainingImageDigest:
                     description: TrainingImageDigest is the immutable digest for spec.trainingImage
                       content.
@@ -130,6 +384,54 @@ spec:
                 - datasetVersion
                 - outputArtifactVersion
                 - trainingImageDigest
+                type: object
+              outcomeMonitoring:
+                description: OutcomeMonitoring optionally consumes delayed-label quality
+                  reports.
+                properties:
+                  enabled:
+                    description: Enabled controls whether outcome reports are consumed.
+                    type: boolean
+                  minimumCoverageBPS:
+                    description: |-
+                      MinimumCoverageBPS is the minimum fraction of predictions with observed outcomes.
+                      Zero disables the coverage condition.
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
+                    type: integer
+                  minimumRecallBPS:
+                    description: |-
+                      MinimumRecallBPS is the minimum observed recall in basis points.
+                      Zero disables the recall condition.
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
+                    type: integer
+                  reportRef:
+                    description: ReportRef identifies the ConfigMap and data key containing
+                      the report.
+                    properties:
+                      kind:
+                        default: ConfigMap
+                        description: Kind identifies how the dataset should be resolved.
+                        enum:
+                        - ConfigMap
+                        - PersistentVolumeClaim
+                        - ObjectStore
+                        type: string
+                      name:
+                        description: Name is the resource/bucket identifier.
+                        minLength: 1
+                        type: string
+                      path:
+                        description: Path is the key/path inside the dataset source.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - path
+                    type: object
                 type: object
               outputRef:
                 description: OutputRef points to model artifact output location.
@@ -196,6 +498,100 @@ spec:
                         type: string
                     type: object
                 type: object
+              preparation:
+                description: Preparation optionally materializes a validated curated
+                  dataset before training.
+                properties:
+                  enabled:
+                    description: Enabled controls whether the preparation Job is required.
+                    type: boolean
+                  image:
+                    description: Image is the immutable preparation workload image.
+                    type: string
+                  outputRef:
+                    description: OutputRef identifies the curated dataset location.
+                    properties:
+                      kind:
+                        default: ConfigMap
+                        description: Kind identifies how the dataset should be resolved.
+                        enum:
+                        - ConfigMap
+                        - PersistentVolumeClaim
+                        - ObjectStore
+                        type: string
+                      name:
+                        description: Name is the resource/bucket identifier.
+                        minLength: 1
+                        type: string
+                      path:
+                        description: Path is the key/path inside the dataset source.
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - path
+                    type: object
+                  resources:
+                    description: Resources declares resources for the preparation
+                      workload.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                type: object
               resources:
                 description: Resources declares container resource requests/limits
                   for training.
@@ -259,11 +655,30 @@ spec:
               serving:
                 description: Serving captures deployment intent used by later milestones.
                 properties:
+                  canaryWeightBPS:
+                    description: |-
+                      CanaryWeightBPS is candidate traffic in basis points (0-10000).
+                      Zero is the safe default and disables candidate traffic.
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
+                    type: integer
                   enabled:
                     description: Enabled toggles inference deployment.
                     type: boolean
+                  gatewayName:
+                    description: GatewayName is the Gateway API parent for a canary
+                      HTTPRoute.
+                    type: string
                   image:
                     description: Image is the serving container image.
+                    type: string
+                  mode:
+                    default: Shadow
+                    description: Mode controls traffic exposure.
+                    enum:
+                    - Shadow
+                    - Canary
                     type: string
                   port:
                     default: 8080
@@ -278,6 +693,13 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                  routeHost:
+                    description: RouteHost is the hostname matched by the canary HTTPRoute.
+                    type: string
+                  stableServiceName:
+                    description: StableServiceName is the existing stable backend
+                      used by a canary route.
+                    type: string
                 type: object
               task:
                 default: fraud-scoring
@@ -362,6 +784,22 @@ spec:
                   - type
                   type: object
                 type: array
+              driftMonitoringReference:
+                description: DriftMonitoringReference identifies the scheduled drift
+                  CronJob.
+                type: string
+              driftObservedAt:
+                description: DriftObservedAt records when the latest report was observed.
+                format: date-time
+                type: string
+              driftReportReference:
+                description: DriftReportReference identifies the latest observed drift
+                  report.
+                type: string
+              driftStatus:
+                description: 'DriftStatus is the latest report status: within_baseline
+                  or drift_detected.'
+                type: string
               evidence:
                 description: Evidence captures key governance decisions.
                 items:
@@ -414,11 +852,45 @@ spec:
                   generation.
                 format: int64
                 type: integer
+              outcomeCoverage:
+                description: OutcomeCoverage and OutcomeRecall are the latest observed
+                  quality metrics.
+                format: int32
+                type: integer
+              outcomeObservedAt:
+                description: OutcomeObservedAt records when the latest outcome report
+                  was observed.
+                format: date-time
+                type: string
+              outcomeRecall:
+                format: int32
+                type: integer
+              outcomeReportReference:
+                description: OutcomeReportReference identifies the latest observed
+                  outcome report.
+                type: string
               phase:
                 description: Phase provides a high-level workflow stage.
                 type: string
+              promotedAt:
+                description: PromotedAt records when the approved artifact was handed
+                  off for serving.
+                format: date-time
+                type: string
+              promotionReference:
+                description: PromotionReference identifies the immutable promotion
+                  record after approval.
+                type: string
               reason:
                 description: Reason is a machine-readable summary of the current phase.
+                type: string
+              servingReference:
+                description: ServingReference identifies the shadow Deployment after
+                  it is created.
+                type: string
+              trafficReference:
+                description: TrafficReference identifies the Gateway API route after
+                  canary configuration.
                 type: string
             type: object
         type: object
