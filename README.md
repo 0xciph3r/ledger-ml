@@ -487,8 +487,13 @@ Container execution uses the same `LEDGERML_*` contract values as above.
   cryptographic/non-repudiation proof yet.
 - A validating admission webhook now enforces the same create/update contract before
   reconciliation. The controller retains its checks as defense in depth. Production
-  deployment still requires serving the webhook with a trusted certificate and
-  registering the generated validating webhook configuration.
+  deployment assets are in `config/webhook`. They use cert-manager to issue a
+  namespace-scoped self-signed certificate and inject its CA into the webhook
+  configuration; replace the Issuer with an organization-managed issuer when required.
+The kustomization also patches the conventional `ledger-ml-controller-manager`
+Deployment to mount the generated certificate at controller-runtime's default path.
+Install cert-manager before applying these resources, or replace the Issuer and
+Certificate resources with the cluster's existing certificate provisioning system.
 
 Not implemented yet (later milestones): continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
