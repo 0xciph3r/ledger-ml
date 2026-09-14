@@ -26,7 +26,7 @@ An engineer can submit one `RiskModel` resource and use Kubernetes-native status
 follow the model from training through an approval-gated deployment. The system must
 make the model version, training inputs, evaluation result, and deployment state visible.
 
-### MVP target scope (planned)
+### Initial target scope
 
 - Go Kubernetes operator using controller-runtime
 - `RiskModel` custom resource with validation and status conditions
@@ -37,8 +37,8 @@ make the model version, training inputs, evaluation result, and deployment state
 - HTTP inference service for fraud-risk predictions
 - Prometheus metrics for workload state, predictions, latency, and errors
 - Retry-safe reconciliation, terminal failure states, and basic rollback
-- Local kind-based development workflow
-- Architecture, threat model, runbook, and failure-mode documentation
+- Local Kubernetes development workflow
+- Architecture, governance, and failure-mode documentation
 
 ### Not included in the MVP
 
@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 7: governed preparation and training stages)
+## Current implementation status (release candidate)
 
 Implemented in this milestone:
 
@@ -80,7 +80,7 @@ Implemented in this milestone:
   - lineage hash
   - approvers counted toward policy
   - governance evidence records
-  - model version (reserved for later milestones)
+  - model version and promoted artifact identity
   - immutable promotion record reference and timestamp
   - reason/message
 - Idempotent reconciler that creates a single owned preparation Job and training Job
@@ -154,6 +154,13 @@ Implemented in this milestone:
   `evaluation-lineage.json` and exits nonzero when a quality gate fails.
 - Focused unit tests for API/controller behavior plus trainer determinism, imbalance,
   required features, metrics output, missing environment validation, and snapshot invariants.
+- PVC-backed and S3-compatible artifact storage with immutable versioned keys and
+  external credential injection.
+- Prometheus ServiceMonitor/alerting assets, admission validation, cert-manager
+  webhook deployment assets, resource-aware scheduling profiles, and opt-in Kueue
+  batch queues.
+- GitHub Actions CI and manually gated image release workflows with provenance,
+  SBOM generation, and vulnerability scanning.
 
 ### Current training workload contract
 
@@ -592,6 +599,16 @@ GitHub Actions provides two deliberately separate paths:
 The release workflow does not deploy to production. Kubernetes promotion remains a
 separate, explicitly approved step using the published image digests and the existing
 model evaluation, approval, and canary policies.
+
+## Release boundary
+
+This repository is a production-oriented reference platform and interview portfolio,
+not a claim of production fraud-detection certification. Before a real deployment,
+operators must supply organization-specific images, registries, certificate issuers,
+RBAC, network policies, secrets/workload identity, Prometheus retention, backup
+procedures, and approved data contracts. Continuous retraining, a feature store,
+GPU-specific serving, and cryptographic artifact/approval attestation remain
+deliberate follow-on capabilities.
 
 ## Code structure and operator concepts
 
