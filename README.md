@@ -5,10 +5,10 @@ Production-oriented Kubernetes operator for regulated financial-services ML work
 Ledger ML provides a Kubernetes-native control plane for reproducible, auditable fraud
 and risk-model training, evaluation, approval, deployment, monitoring, and rollback.
 
-## MVP
+## Project scope
 
-Ledger ML's first vertical is **fraud scoring**. The MVP will run a complete, reproducible
-model lifecycle on a local Kubernetes cluster:
+Ledger ML's first vertical is **fraud scoring**. The project runs a complete,
+reproducible model lifecycle on Kubernetes:
 
 ```text
 synthetic transactions
@@ -20,10 +20,10 @@ synthetic transactions
         -> prediction and metrics
 ```
 
-### MVP outcome
+### Project outcome
 
 An engineer can submit one `RiskModel` resource and use Kubernetes-native status to
-follow the model from training through an approval-gated deployment. The system must
+follow the model from training through an approval-gated deployment. The system makes
 make the model version, training inputs, evaluation result, and deployment state visible.
 
 ### Initial target scope
@@ -40,7 +40,7 @@ make the model version, training inputs, evaluation result, and deployment state
 - Local Kubernetes development workflow
 - Architecture, governance, and failure-mode documentation
 
-### Not included in the MVP
+### Deliberate scope boundaries
 
 - Real customer data or claims of regulatory compliance
 - Production cloud deployment
@@ -51,12 +51,12 @@ make the model version, training inputs, evaluation result, and deployment state
 - Advanced drift detection
 - Multi-tenant billing or chargeback
 
-These are deliberate exclusions. The MVP should teach the lifecycle and establish
-production-quality boundaries before adding scale.
+These are deliberate exclusions. The project establishes the lifecycle and
+production-quality boundaries before adding those capabilities.
 
 ## Current implementation status (release candidate)
 
-Implemented in this milestone:
+Implemented capabilities:
 
 - Go module and controller-runtime manager bootstrap
 - Versioned API type: `ledger.ledgerml.io/v1alpha1`, kind `RiskModel`
@@ -187,7 +187,7 @@ When preparation is enabled, the preparation Job additionally receives:
 
 The preparation Job receives the raw `LEDGERML_DATASET_*` values. The training Job
 receives the curated preparation output and `LEDGERML_PREPARED_DATASET_VERSION`.
-Preparation is disabled by default to preserve the synthetic MVP path.
+Preparation is disabled by default to preserve the synthetic-data path.
 
 When evaluation is enabled, the evaluator Job additionally receives:
 
@@ -216,7 +216,7 @@ Dataset selection is now controlled by `LEDGERML_DATASET_KIND`:
 - `DoubleEntryLedgerSnapshot` (sanitized snapshot adapter)
 
 The controller intentionally does **not** override container `command`/`args` in this
-milestone; the training image entrypoint defines execution behavior.
+implementation; the training image entrypoint defines execution behavior.
 
 The trainer now uses this contract to generate synthetic transactions, train a real
 fraud classifier, and emit immutable outputs.
@@ -403,7 +403,7 @@ Snapshot training emits stable transaction-level features including:
 - safe presence indicators for session/external references
 - transaction-type indicators
 
-## ML teaching model (synthetic fraud only)
+## ML data model (synthetic fraud only)
 
 ### Data-generating assumptions and label definition
 
@@ -497,7 +497,7 @@ docker build -f training/Dockerfile -t ledger-ml-fraud-trainer:local .
 
 Container execution uses the same `LEDGERML_*` contract values as above.
 
-## Governance model (teaching scope)
+## Governance model
 
 ### Invariants enforced now
 
@@ -558,11 +558,11 @@ Jobs into a Kueue `LocalQueue`. Serving Deployments are never queued. The
 `LocalQueue`; install Kueue first and tune quotas, flavors, and namespace selectors for
 the cluster. Leaving `queueName` empty preserves direct Kubernetes scheduling.
 
-Not implemented yet (later milestones): continuous retraining, real external data
+Not implemented yet: continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
 
-This milestone is a reproducible teaching model and governance baseline, not production
-fraud detection or regulatory certification.
+This project is a reproducible platform and governance baseline, not production fraud
+detection or regulatory certification.
 
 No real ledger records are committed, uploaded, or required for this repository.
 
@@ -616,7 +616,7 @@ deliberate follow-on capabilities.
 - `internal/controller/`: reconciliation loop that continuously converges observed cluster state toward desired state.
 - `main.go`: manager process wiring scheme, health endpoints, and controller registration.
 
-Teaching focus in this milestone:
+Engineering focus:
 
 - **CRD modeling**: encode operator intent in declarative API fields.
 - **Desired vs observed state**: users set `spec`, controller reports progress in `status`.
@@ -629,9 +629,9 @@ Teaching focus in this milestone:
 - **Leakage prevention**: proxy-label outcome fields are excluded from model features.
 - **Temporal construction**: velocity features depend only on prior events.
 
-## Teaching path
+## Engineering progression
 
-Each milestone has both a working outcome and a concept to learn:
+The project was built in the following progression:
 
 1. **Model the domain** — understand fraud classification, labels, features, precision,
    recall, false positives, and why accuracy alone is insufficient.
@@ -646,9 +646,9 @@ Each milestone has both a working outcome and a concept to learn:
 6. **Harden the platform** — learn rollback, failure injection, authorization, network
    isolation, PII-safe telemetry, and operational runbooks.
 
-## Initial success criteria
+## Current success criteria
 
-The MVP is complete when:
+The current implementation is successful when:
 
 - A clean checkout can create a kind cluster and deploy Ledger ML using documented steps.
 - Submitting a `RiskModel` creates a training workload without manual pod changes.
