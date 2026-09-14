@@ -123,6 +123,15 @@ func TestBuildTrainingJobUsesLineageAndContract(t *testing.T) {
 	if env[envConfigurationDigest] != model.Spec.Lineage.ConfigurationDigest {
 		t.Fatalf("missing configuration digest env, got %q", env[envConfigurationDigest])
 	}
+	if env[envOutputName] != artifactMountPath {
+		t.Fatalf("expected PVC-mounted output path %q, got %q", artifactMountPath, env[envOutputName])
+	}
+	if len(container.VolumeMounts) != 1 || container.VolumeMounts[0].MountPath != artifactMountPath {
+		t.Fatalf("expected artifact PVC mount at %q, got %#v", artifactMountPath, container.VolumeMounts)
+	}
+	if len(job.Spec.Template.Spec.Volumes) != 1 || job.Spec.Template.Spec.Volumes[0].PersistentVolumeClaim.ClaimName != model.Spec.OutputRef.Name {
+		t.Fatalf("expected artifact PVC volume %q, got %#v", model.Spec.OutputRef.Name, job.Spec.Template.Spec.Volumes)
+	}
 }
 
 func TestPreparationJobUsesSourceAndCuratedDatasetContract(t *testing.T) {
@@ -180,7 +189,7 @@ func TestEvaluationJobCarriesQualityGatesAndArtifactLineage(t *testing.T) {
 	if env[envOutputVersion] != model.Spec.Lineage.OutputArtifactVersion {
 		t.Fatalf("expected artifact version %q, got %q", model.Spec.Lineage.OutputArtifactVersion, env[envOutputVersion])
 	}
-	expectedEvaluationPath := model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/evaluation-lineage.json"
+	expectedEvaluationPath := artifactMountPath + "/" + model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/evaluation-lineage.json"
 	if env[envEvaluationPath] != expectedEvaluationPath {
 		t.Fatalf("expected evaluation path %q, got %q", expectedEvaluationPath, env[envEvaluationPath])
 	}

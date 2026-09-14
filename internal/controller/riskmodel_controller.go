@@ -73,6 +73,8 @@ const (
 	envOutputVersion               = "LEDGERML_OUTPUT_ARTIFACT_VERSION"
 	envModelPath                   = "LEDGERML_MODEL_PATH"
 	envLineageHash                 = "LEDGERML_LINEAGE_HASH"
+	artifactMountPath              = "/mnt/model-artifacts"
+	artifactVolumeName             = "model-artifacts"
 	envDriftBaselineKind           = "LEDGERML_DRIFT_BASELINE_KIND"
 	envDriftBaselineName           = "LEDGERML_DRIFT_BASELINE_NAME"
 	envDriftBaselinePath           = "LEDGERML_DRIFT_BASELINE_PATH"
@@ -940,34 +942,33 @@ func buildShadowDeployment(model *ledgerv1alpha1.RiskModel) *appsv1.Deployment {
 	replicas := servingReplicas(model)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      deploymentName(model.Name),
-			Namespace: model.Namespace,
-			Labels:    labels,
-			Annotations: map[string]string{
-				annotationLineageHash: model.Status.LineageHash,
-			},
+			Name: deploymentName(model.Name), Namespace: model.Namespace, Labels: labels,
+			Annotations: map[string]string{annotationLineageHash: model.Status.LineageHash},
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{labelServingName: model.Name}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{
-					Name:  "inference",
-					Image: model.Spec.Serving.Image,
-					Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: model.Spec.Serving.Port}},
-					Env: []corev1.EnvVar{
-						{Name: envOutputKind, Value: model.Spec.OutputRef.Kind},
-						{Name: envOutputName, Value: model.Spec.OutputRef.Name},
-						{Name: envOutputPath, Value: model.Spec.OutputRef.Path},
-						{Name: envOutputVersion, Value: model.Spec.Lineage.OutputArtifactVersion},
-						{Name: envModelPath, Value: model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/model.joblib"},
-						{Name: envLineageHash, Value: model.Status.LineageHash},
-						{Name: envTrainingImageDigest, Value: model.Spec.Lineage.TrainingImageDigest},
-						{Name: envConfigurationDigest, Value: model.Spec.Lineage.ConfigurationDigest},
-						{Name: "LEDGERML_SERVING_MODE", Value: "shadow"},
-					},
-				}}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "inference", Image: model.Spec.Serving.Image,
+						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: model.Spec.Serving.Port}},
+						Env: []corev1.EnvVar{
+							{Name: envOutputKind, Value: model.Spec.OutputRef.Kind},
+							{Name: envOutputName, Value: model.Spec.OutputRef.Name},
+							{Name: envOutputPath, Value: model.Spec.OutputRef.Path},
+							{Name: envOutputVersion, Value: model.Spec.Lineage.OutputArtifactVersion},
+							{Name: envModelPath, Value: artifactMountPath + "/" + model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/model.joblib"},
+							{Name: envLineageHash, Value: model.Status.LineageHash},
+							{Name: envTrainingImageDigest, Value: model.Spec.Lineage.TrainingImageDigest},
+							{Name: envConfigurationDigest, Value: model.Spec.Lineage.ConfigurationDigest},
+							{Name: "LEDGERML_SERVING_MODE", Value: "shadow"},
+						},
+						VolumeMounts: []corev1.VolumeMount{{Name: artifactVolumeName, MountPath: artifactMountPath, ReadOnly: true}},
+					}},
+					Volumes: []corev1.Volume{artifactVolume(model)},
+				},
 			},
 		},
 	}
@@ -1071,12 +1072,15 @@ func buildEvaluationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 						Name:      evaluationContainerName,
 						Image:     model.Spec.Evaluation.Image,
 						Resources: trainingContainerResources(model.Spec.Evaluation.Resources),
+						VolumeMounts: []corev1.VolumeMount{{
+							Name: artifactVolumeName, MountPath: artifactMountPath, ReadOnly: true,
+						}},
 						Env: []corev1.EnvVar{
 							{Name: envOutputKind, Value: model.Spec.OutputRef.Kind},
-							{Name: envOutputName, Value: model.Spec.OutputRef.Name},
+							{Name: envOutputName, Value: artifactMountPath},
 							{Name: envOutputPath, Value: model.Spec.OutputRef.Path},
 							{Name: envOutputVersion, Value: model.Spec.Lineage.OutputArtifactVersion},
-							{Name: envEvaluationPath, Value: model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/evaluation-lineage.json"},
+							{Name: envEvaluationPath, Value: artifactMountPath + "/" + model.Spec.OutputRef.Path + "/" + model.Spec.Lineage.OutputArtifactVersion + "/evaluation-lineage.json"},
 							{Name: envTrainingImageDigest, Value: model.Spec.Lineage.TrainingImageDigest},
 							{Name: envConfigurationDigest, Value: model.Spec.Lineage.ConfigurationDigest},
 							{Name: envEvaluationMinRecall, Value: strconv.FormatFloat(float64(model.Spec.Evaluation.MinRecallBPS)/10000, 'f', -1, 64)},
@@ -1084,6 +1088,7 @@ func buildEvaluationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 							{Name: envEvaluationMaxFalseNegatives, Value: strconv.Itoa(int(model.Spec.Evaluation.MaxFalseNegatives))},
 						},
 					}},
+					Volumes: []corev1.Volume{artifactVolume(model)},
 				},
 			},
 		},
@@ -1131,6 +1136,9 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 							Name:      trainingContainerName,
 							Image:     model.Spec.TrainingImage,
 							Resources: trainingContainerResources(model.Spec.Resources),
+							VolumeMounts: []corev1.VolumeMount{{
+								Name: artifactVolumeName, MountPath: artifactMountPath,
+							}},
 							Env: []corev1.EnvVar{
 								{Name: envTask, Value: model.Spec.Task},
 								{Name: envDatasetKind, Value: datasetKind},
@@ -1138,7 +1146,7 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 								{Name: envDatasetPath, Value: datasetPath},
 								{Name: envDatasetVersion, Value: datasetVersion},
 								{Name: envOutputKind, Value: model.Spec.OutputRef.Kind},
-								{Name: envOutputName, Value: model.Spec.OutputRef.Name},
+								{Name: envOutputName, Value: artifactWorkloadName(model)},
 								{Name: envOutputPath, Value: model.Spec.OutputRef.Path},
 								{Name: envOutputVersion, Value: model.Spec.Lineage.OutputArtifactVersion},
 								{Name: envTrainingImageDigest, Value: model.Spec.Lineage.TrainingImageDigest},
@@ -1146,10 +1154,29 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 							},
 						},
 					},
+					Volumes: []corev1.Volume{artifactVolume(model)},
 				},
 			},
 		},
 	}
+}
+
+func artifactVolume(model *ledgerv1alpha1.RiskModel) corev1.Volume {
+	return corev1.Volume{
+		Name: artifactVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+				ClaimName: model.Spec.OutputRef.Name,
+			},
+		},
+	}
+}
+
+func artifactWorkloadName(model *ledgerv1alpha1.RiskModel) string {
+	if model.Spec.OutputRef.Kind == "PersistentVolumeClaim" {
+		return artifactMountPath
+	}
+	return model.Spec.OutputRef.Name
 }
 
 func trainingContainerResources(resources corev1.ResourceRequirements) corev1.ResourceRequirements {

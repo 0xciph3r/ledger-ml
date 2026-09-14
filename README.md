@@ -213,6 +213,16 @@ The service rejects missing, unknown, boolean, non-numeric, and non-finite featu
 values. It does not log raw requests. The initial implementation is intentionally
 CPU-oriented; GPU serving will be justified later with measured latency and cost data.
 
+### Local PVC artifact contract
+
+The current runnable artifact adapter uses a Kubernetes `PersistentVolumeClaim`.
+Training, evaluation, and serving workloads mount `spec.outputRef.name` at
+`/mnt/model-artifacts`. Training writes the versioned model and evaluation evidence
+under `spec.outputRef.path`; evaluation reads that evidence from the same mount; and
+serving loads `model.joblib` from the promoted artifact version. `ObjectStore` remains
+an API option for a future adapter and is rejected when serving is enabled until that
+adapter exists.
+
 ## Drift detection foundation
 
 The `monitoring/` package establishes a training baseline and compares later feature

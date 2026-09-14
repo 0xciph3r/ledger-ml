@@ -91,6 +91,30 @@ func TestRiskModelValidateServing(t *testing.T) {
 	}
 }
 
+func TestRiskModelServingArtifactKindsAreTableDriven(t *testing.T) {
+	cases := []struct {
+		name       string
+		outputKind string
+		wantError  bool
+	}{
+		{name: "PVC is supported locally", outputKind: "PersistentVolumeClaim", wantError: false},
+		{name: "object store requires adapter", outputKind: "ObjectStore", wantError: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &RiskModel{Spec: validRiskModelSpec()}
+			model.Spec.Serving.Enabled = true
+			model.Spec.Serving.Image = "ghcr.io/ledger-ml/serving:latest"
+			model.Spec.OutputRef.Kind = tc.outputKind
+			model.Default()
+			err := model.ValidateCreate()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("expected validation error=%v, got %v", tc.wantError, err)
+			}
+		})
+	}
+}
+
 func TestRiskModelValidateUpdateRejectsImmutableLineage(t *testing.T) {
 	oldModel := &RiskModel{
 		ObjectMeta: metav1.ObjectMeta{Name: "model-a"},
