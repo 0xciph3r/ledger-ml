@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -688,6 +689,7 @@ func TestCanaryRouteDefaultsToConfiguredWeightAndSupportsRollback(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected HTTPRoute spec")
 	}
+
 	rules, ok := spec["rules"].([]any)
 	if !ok || len(rules) != 1 {
 		t.Fatalf("expected one HTTPRoute rule, got %#v", spec["rules"])
@@ -703,6 +705,122 @@ func TestCanaryRouteDefaultsToConfiguredWeightAndSupportsRollback(t *testing.T) 
 	rollbackBackends := rollbackSpec["rules"].([]any)[0].(map[string]any)["backendRefs"].([]any)
 	if rollbackBackends[0].(map[string]any)["weight"] != int64(10000) || rollbackBackends[1].(map[string]any)["weight"] != int64(0) {
 		t.Fatalf("expected rollback to route 100%% stable and 0%% canary, got %#v", rollbackBackends)
+	}
+}
+
+type fakePrometheusQuerier struct {
+	value float64
+	err   error
+	calls int
+}
+
+func (f *fakePrometheusQuerier) Query(context.Context, string, string) (float64, error) {
+	f.calls++
+	return f.value, f.err
+}
+
+func TestCanaryProgressionEvaluationIsTableDriven(t *testing.T) {
+	cases := []struct {
+		name        string
+		value       float64
+		err         error
+		rollback    bool
+		wantCalls   int
+		wantStep    int32
+		wantWeight  int32
+		wantState   string
+		wantRequeue bool
+	}{
+		{
+			name:        "healthy query advances one step",
+			value:       0.005,
+			wantCalls:   1,
+			wantStep:    2,
+			wantWeight:  1000,
+			wantState:   "Observing",
+			wantRequeue: true,
+		},
+		{
+			name:       "unhealthy query pauses with zero candidate",
+			value:      0.02,
+			wantCalls:  1,
+			wantStep:   1,
+			wantWeight: 0,
+			wantState:  "Paused",
+		},
+		{
+			name:       "query failure pauses with zero candidate",
+			err:        fmt.Errorf("Prometheus unavailable"),
+			wantCalls:  1,
+			wantStep:   1,
+			wantWeight: 0,
+			wantState:  "Paused",
+		},
+		{
+			name:       "manual rollback takes precedence",
+			value:      0,
+			rollback:   true,
+			wantCalls:  0,
+			wantStep:   1,
+			wantWeight: 0,
+			wantState:  "RolledBack",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := validRiskModel()
+			model.Spec.Serving.Enabled = true
+			model.Spec.Serving.Image = "ghcr.io/ledger-ml/inference:latest"
+			model.Spec.Serving.Mode = "Canary"
+			model.Spec.Serving.StableServiceName = "fraud-risk-model-stable"
+			model.Spec.Serving.GatewayName = "ledger-gateway"
+			model.Spec.Serving.RouteHost = "fraud.example.internal"
+			model.Spec.Serving.CanaryProgression = ledgerv1alpha1.CanaryProgression{
+				Enabled:          true,
+				ProgressionModel: "prometheus_query",
+				RollbackBehavior: "zero_candidate",
+				TrafficStepsBPS:  []int32{100, 1000, 10000},
+				ObservationWindow: metav1.Duration{
+					Duration: time.Minute,
+				},
+				Prometheus: ledgerv1alpha1.PrometheusQueryConfig{
+					URL:   "http://prometheus.example/api/v1/query",
+					Query: "vector(0)",
+				},
+				MaxErrorRateBPS: 100,
+			}
+			model.Status.CurrentStep = 1
+			model.Status.CurrentWeightBPS = 100
+			model.Status.ProgressionState = "Observing"
+			started := metav1.NewTime(time.Now().Add(-2 * time.Minute))
+			model.Status.CanaryStepStartedAt = &started
+			if tc.rollback {
+				model.Annotations = map[string]string{annotationRollbackCanary: "true"}
+			}
+
+			querier := &fakePrometheusQuerier{value: tc.value, err: tc.err}
+			reconciler := &RiskModelReconciler{PrometheusQuerier: querier}
+			requeue := reconciler.progressCanary(context.Background(), model)
+			if querier.calls != tc.wantCalls {
+				t.Fatalf("expected %d Prometheus calls, got %d", tc.wantCalls, querier.calls)
+			}
+			if model.Status.CurrentStep != tc.wantStep || model.Status.CurrentWeightBPS != tc.wantWeight {
+				t.Fatalf("expected step/weight %d/%d, got %d/%d", tc.wantStep, tc.wantWeight, model.Status.CurrentStep, model.Status.CurrentWeightBPS)
+			}
+			if model.Status.ProgressionState != tc.wantState {
+				t.Fatalf("expected progression state %q, got %q", tc.wantState, model.Status.ProgressionState)
+			}
+			if (requeue > 0) != tc.wantRequeue {
+				t.Fatalf("expected requeue=%v, got %s", tc.wantRequeue, requeue)
+			}
+			route := buildCanaryRoute(model, serviceName(model.Name))
+			spec := route.Object["spec"].(map[string]any)
+			backends := spec["rules"].([]any)[0].(map[string]any)["backendRefs"].([]any)
+			if backends[1].(map[string]any)["weight"] != int64(tc.wantWeight) {
+				t.Fatalf("expected route candidate weight %d, got %#v", tc.wantWeight, backends[1].(map[string]any)["weight"])
+			}
+		})
 	}
 }
 

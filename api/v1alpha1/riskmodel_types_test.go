@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -100,12 +101,97 @@ func TestRiskModelServingArtifactKindsAreTableDriven(t *testing.T) {
 		{name: "PVC is supported locally", outputKind: "PersistentVolumeClaim", wantError: false},
 		{name: "object store is supported", outputKind: "ObjectStore", wantError: false},
 	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			model := &RiskModel{Spec: validRiskModelSpec()}
 			model.Spec.Serving.Enabled = true
 			model.Spec.Serving.Image = "ghcr.io/ledger-ml/serving:latest"
 			model.Spec.OutputRef.Kind = tc.outputKind
+			model.Default()
+			err := model.ValidateCreate()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("expected validation error=%v, got %v", tc.wantError, err)
+			}
+
+		})
+	}
+}
+
+func TestRiskModelCanaryProgressionValidationIsTableDriven(t *testing.T) {
+	cases := []struct {
+		name      string
+		mutate    func(*CanaryProgression)
+		wantError bool
+	}{
+		{
+			name: "valid Prometheus progression",
+			mutate: func(progression *CanaryProgression) {
+				*progression = CanaryProgression{
+					Enabled:          true,
+					ProgressionModel: "prometheus_query",
+					RollbackBehavior: "zero_candidate",
+					TrafficStepsBPS:  []int32{100, 1000, 10000},
+					ObservationWindow: metav1.Duration{
+						Duration: time.Minute,
+					},
+					Prometheus: PrometheusQueryConfig{
+						URL:   "http://prometheus.monitoring.svc/api/v1/query",
+						Query: "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+					},
+					MaxErrorRateBPS: 100,
+				}
+			},
+			wantError: false,
+		},
+		{
+			name: "steps must increase",
+			mutate: func(progression *CanaryProgression) {
+				progression.TrafficStepsBPS = []int32{1000, 100}
+			},
+			wantError: true,
+		},
+		{
+			name: "query configuration is required",
+			mutate: func(progression *CanaryProgression) {
+				progression.Prometheus.Query = ""
+			},
+			wantError: true,
+		},
+		{
+			name: "zero traffic step is rejected",
+			mutate: func(progression *CanaryProgression) {
+				progression.TrafficStepsBPS = []int32{0}
+			},
+			wantError: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := validRiskModelSpec()
+			spec.Serving.Enabled = true
+			spec.Serving.Image = "ghcr.io/ledger-ml/serving:latest"
+			spec.Serving.Mode = "Canary"
+			spec.Serving.StableServiceName = "stable"
+			spec.Serving.GatewayName = "gateway"
+			spec.Serving.RouteHost = "risk.example.internal"
+			spec.Serving.CanaryProgression = CanaryProgression{
+				Enabled:          true,
+				ProgressionModel: "prometheus_query",
+				RollbackBehavior: "zero_candidate",
+				TrafficStepsBPS:  []int32{100, 1000},
+				ObservationWindow: metav1.Duration{
+					Duration: time.Minute,
+				},
+				Prometheus: PrometheusQueryConfig{
+					URL:   "http://prometheus.monitoring.svc/api/v1/query",
+					Query: "vector(0)",
+				},
+				MaxErrorRateBPS: 100,
+			}
+			tc.mutate(&spec.Serving.CanaryProgression)
+			model := &RiskModel{Spec: spec}
 			model.Default()
 			err := model.ValidateCreate()
 			if (err != nil) != tc.wantError {

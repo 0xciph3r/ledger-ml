@@ -662,6 +662,64 @@ spec:
               serving:
                 description: Serving captures deployment intent used by later milestones.
                 properties:
+                  canaryProgression:
+                    description: CanaryProgression controls optional automated canary
+                      traffic progression.
+                    properties:
+                      enabled:
+                        description: |-
+                          Enabled toggles automated progression. When false, the configured
+                          canaryWeightBPS and manual rollback annotation retain their existing behavior.
+                        type: boolean
+                      maxErrorRateBPS:
+                        description: MaxErrorRateBPS is the largest allowed error-rate
+                          ratio in basis points.
+                        format: int32
+                        maximum: 10000
+                        minimum: 0
+                        type: integer
+                      observationWindow:
+                        description: ObservationWindow is the minimum time a step
+                          must remain healthy before advancing.
+                        type: string
+                      progressionModel:
+                        default: prometheus_query
+                        description: ProgressionModel selects the health signal used
+                          for progression.
+                        enum:
+                        - prometheus_query
+                        type: string
+                      prometheus:
+                        description: Prometheus identifies the query endpoint and
+                          PromQL health query.
+                        properties:
+                          query:
+                            description: |-
+                              Query is the PromQL expression. It must return one scalar/vector value
+                              representing an error-rate ratio in the range 0..1.
+                            type: string
+                          url:
+                            description: URL is the Prometheus HTTP API instant-query
+                              endpoint.
+                            type: string
+                        type: object
+                      rollbackBehavior:
+                        default: zero_candidate
+                        description: RollbackBehavior controls candidate traffic after
+                          an unhealthy or failed query.
+                        enum:
+                        - zero_candidate
+                        type: string
+                      trafficStepsBPS:
+                        description: TrafficStepsBPS lists strictly increasing candidate
+                          traffic weights.
+                        items:
+                          format: int32
+                          type: integer
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                    type: object
                   canaryWeightBPS:
                     description: |-
                       CanaryWeightBPS is candidate traffic in basis points (0-10000).
@@ -734,6 +792,11 @@ spec:
                 items:
                   type: string
                 type: array
+              canaryStepStartedAt:
+                description: CanaryStepStartedAt records when the current step's observation
+                  window began.
+                format: date-time
+                type: string
               conditions:
                 description: Conditions contain granular reconciliation signals.
                 items:
@@ -791,6 +854,16 @@ spec:
                   - type
                   type: object
                 type: array
+              currentStep:
+                description: CurrentStep is the one-based automated canary progression
+                  step.
+                format: int32
+                type: integer
+              currentWeightBPS:
+                description: CurrentWeightBPS is the candidate traffic currently applied
+                  to the route.
+                format: int32
+                type: integer
               driftMonitoringReference:
                 description: DriftMonitoringReference identifies the scheduled drift
                   CronJob.
@@ -842,6 +915,11 @@ spec:
                   - time
                   type: object
                 type: array
+              lastEvaluation:
+                description: LastEvaluation records the most recent Prometheus health
+                  evaluation.
+                format: date-time
+                type: string
               lineageHash:
                 description: LineageHash is the controller-calculated hash of immutable
                   identity fields.
@@ -878,6 +956,11 @@ spec:
                 type: string
               phase:
                 description: Phase provides a high-level workflow stage.
+                type: string
+              progressionState:
+                description: |-
+                  ProgressionState describes automated canary progression: Disabled, Observing,
+                  Completed, or Paused.
                 type: string
               promotedAt:
                 description: PromotedAt records when the approved artifact was handed

@@ -6,9 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -105,8 +110,98 @@ const (
 // RiskModelReconciler reconciles a RiskModel object.
 type RiskModelReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme            *runtime.Scheme
+	Recorder          record.EventRecorder
+	PrometheusQuerier PrometheusQuerier
+}
+
+// PrometheusQuerier evaluates an instant Prometheus query and returns an
+// error-rate ratio in the range 0..1.
+type PrometheusQuerier interface {
+	Query(ctx context.Context, endpoint, query string) (float64, error)
+}
+
+// HTTPPrometheusQuerier is the production Prometheus HTTP API client.
+type HTTPPrometheusQuerier struct {
+	Client *http.Client
+}
+
+func (q HTTPPrometheusQuerier) Query(ctx context.Context, endpoint, query string) (float64, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return 0, fmt.Errorf("parse Prometheus URL: %w", err)
+	}
+	values := parsed.Query()
+	values.Set("query", query)
+	parsed.RawQuery = values.Encode()
+
+	client := q.Client
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("build Prometheus request: %w", err)
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return 0, fmt.Errorf("query Prometheus: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return 0, fmt.Errorf("Prometheus returned HTTP %s: %s", response.Status, strings.TrimSpace(string(body)))
+	}
+
+	var payload struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+		Data   struct {
+			Result json.RawMessage `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return 0, fmt.Errorf("decode Prometheus response: %w", err)
+	}
+	if payload.Status != "success" {
+		if payload.Error == "" {
+			payload.Error = "query was not successful"
+		}
+		return 0, fmt.Errorf("Prometheus query failed: %s", payload.Error)
+	}
+	var vectorResults []struct {
+		Value []json.RawMessage `json:"value"`
+	}
+	var valueRaw json.RawMessage
+	if err := json.Unmarshal(payload.Data.Result, &vectorResults); err == nil {
+		if len(vectorResults) != 1 || len(vectorResults[0].Value) < 2 {
+			return 0, fmt.Errorf("Prometheus query returned %d results; expected exactly one scalar result", len(vectorResults))
+		}
+		valueRaw = vectorResults[0].Value[1]
+	} else {
+		var scalarResult []json.RawMessage
+		if scalarErr := json.Unmarshal(payload.Data.Result, &scalarResult); scalarErr != nil || len(scalarResult) < 2 {
+			if scalarErr != nil {
+				return 0, fmt.Errorf("decode Prometheus scalar result: %w", scalarErr)
+			}
+			return 0, fmt.Errorf("Prometheus scalar result did not contain a value")
+		}
+		valueRaw = scalarResult[1]
+	}
+	var valueString string
+	if err := json.Unmarshal(valueRaw, &valueString); err != nil {
+		var valueNumber float64
+		if numberErr := json.Unmarshal(valueRaw, &valueNumber); numberErr != nil {
+			return 0, fmt.Errorf("decode Prometheus result value: %w", err)
+		}
+		return valueNumber, nil
+	}
+	value, err := strconv.ParseFloat(valueString, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse Prometheus result value %q: %w", valueString, err)
+	}
+	return value, nil
 }
 
 // +kubebuilder:rbac:groups=ledger.ledgerml.io,resources=riskmodels,verbs=get;list;watch
@@ -139,6 +234,7 @@ func (r *RiskModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	model.Default()
 
 	original := model.DeepCopy()
+	var requeueAfter time.Duration
 	model.Status.ObservedGeneration = model.Generation
 	calculatedLineageHash := lineageHash(model)
 	persistedLineageHash := strings.TrimSpace(model.Status.LineageHash)
@@ -412,6 +508,7 @@ func (r *RiskModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			setCondition(model, conditionTypeServing, metav1.ConditionTrue, "ShadowServingReady", "Shadow serving is available internally; no production traffic route has been created.")
 			setCondition(model, conditionTypeReady, metav1.ConditionTrue, "ShadowServingReady", "Approved model is promoted and available for shadow traffic.")
 			if model.Spec.Serving.Mode == "Canary" {
+				requeueAfter = r.progressCanary(ctx, model)
 				route, err := r.ensureCanaryRoute(ctx, model, service)
 				if err != nil {
 					model.Status.Reason = "CanaryRouteFailed"
@@ -423,8 +520,22 @@ func (r *RiskModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 					return ctrl.Result{}, err
 				}
 				model.Status.TrafficReference = model.Namespace + "/" + route.GetName()
-				setCondition(model, conditionTypeServing, metav1.ConditionTrue, "CanaryRouteReady", "Gateway API canary route is installed; traffic weight is explicitly controlled.")
-				setCondition(model, conditionTypeReady, metav1.ConditionTrue, "CanaryRouteReady", "Approved model is promoted and canary routing is available.")
+				servingReason := "CanaryRouteReady"
+				servingMessage := "Gateway API canary route is installed; traffic weight is explicitly controlled."
+				if model.Spec.Serving.CanaryProgression.Enabled {
+					servingReason = "CanaryProgression" + model.Status.ProgressionState
+					servingMessage = fmt.Sprintf("Gateway API canary route is installed at %d basis points candidate traffic; progression is %s.", model.Status.CurrentWeightBPS, strings.ToLower(model.Status.ProgressionState))
+				}
+				servingStatus := metav1.ConditionTrue
+				readyStatus := metav1.ConditionTrue
+				if model.Status.ProgressionState == "Paused" {
+					servingStatus = metav1.ConditionFalse
+					readyStatus = metav1.ConditionFalse
+					servingReason = "CanaryProgressionFailed"
+					servingMessage = model.Status.Message
+				}
+				setCondition(model, conditionTypeServing, servingStatus, servingReason, servingMessage)
+				setCondition(model, conditionTypeReady, readyStatus, servingReason, servingMessage)
 			}
 			if model.Spec.DriftMonitoring.Enabled {
 				driftJob, err := r.ensureDriftMonitoring(ctx, model)
@@ -467,7 +578,7 @@ func (r *RiskModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		r.recordEvidenceAndEvent(model, "AwaitingApproval", approval.Reason, approval.Message, job.Name, false)
 	}
 
-	return ctrl.Result{}, r.patchStatusIfChanged(ctx, logger, original, model)
+	return ctrl.Result{RequeueAfter: requeueAfter}, r.patchStatusIfChanged(ctx, logger, original, model)
 }
 
 func rejectModel(model *ledgerv1alpha1.RiskModel, reason string, message string) {
@@ -669,6 +780,114 @@ func (r *RiskModelReconciler) ensureCanaryRoute(
 		return route, nil
 	}
 	return existing, nil
+}
+
+func (r *RiskModelReconciler) progressCanary(ctx context.Context, model *ledgerv1alpha1.RiskModel) time.Duration {
+	progression := model.Spec.Serving.CanaryProgression
+	if !progression.Enabled {
+		return 0
+	}
+
+	if model.Annotations[annotationRollbackCanary] == "true" {
+		model.Status.CurrentWeightBPS = 0
+		model.Status.ProgressionState = "RolledBack"
+		model.Status.Message = "Manual rollback annotation takes precedence over automated canary progression."
+		return 0
+	}
+
+	if model.Status.ProgressionState == "Paused" || model.Status.ProgressionState == "Completed" {
+		return 0
+	}
+
+	now := time.Now()
+	if model.Status.ProgressionState == "RolledBack" {
+		if model.Status.CurrentStep <= 0 || model.Status.CurrentStep > int32(len(progression.TrafficStepsBPS)) {
+			model.Status.CurrentStep = 1
+		}
+		model.Status.CurrentWeightBPS = progression.TrafficStepsBPS[model.Status.CurrentStep-1]
+		model.Status.ProgressionState = "Observing"
+		started := metav1.NewTime(now)
+		model.Status.CanaryStepStartedAt = &started
+		model.Status.Reason = "CanaryProgressionResumed"
+		model.Status.Message = "Manual rollback annotation was removed; canary progression resumed from the current step."
+		return progression.ObservationWindow.Duration
+	}
+	if model.Status.CurrentStep == 0 {
+		model.Status.CurrentStep = 1
+		model.Status.CurrentWeightBPS = progression.TrafficStepsBPS[0]
+		model.Status.ProgressionState = "Observing"
+		started := metav1.NewTime(now)
+		model.Status.CanaryStepStartedAt = &started
+		model.Status.Reason = "CanaryProgressionObserving"
+		model.Status.Message = fmt.Sprintf("Observing canary step 1 at %d basis points for %s before the first health evaluation.", model.Status.CurrentWeightBPS, progression.ObservationWindow.Duration)
+		return progression.ObservationWindow.Duration
+	}
+
+	if model.Status.CurrentStep > int32(len(progression.TrafficStepsBPS)) {
+		model.Status.CurrentStep = int32(len(progression.TrafficStepsBPS))
+		model.Status.CurrentWeightBPS = progression.TrafficStepsBPS[len(progression.TrafficStepsBPS)-1]
+		model.Status.ProgressionState = "Completed"
+		return 0
+	}
+
+	if model.Status.CanaryStepStartedAt == nil {
+		started := metav1.NewTime(now)
+		model.Status.CanaryStepStartedAt = &started
+		model.Status.ProgressionState = "Observing"
+		return progression.ObservationWindow.Duration
+	}
+
+	elapsed := now.Sub(model.Status.CanaryStepStartedAt.Time)
+	if elapsed < progression.ObservationWindow.Duration {
+		return progression.ObservationWindow.Duration - elapsed
+	}
+
+	querier := r.PrometheusQuerier
+	if querier == nil {
+		querier = HTTPPrometheusQuerier{}
+	}
+	errorRate, err := querier.Query(ctx, progression.Prometheus.URL, progression.Prometheus.Query)
+	evaluated := metav1.NewTime(now)
+	model.Status.LastEvaluation = &evaluated
+	if err != nil || math.IsNaN(errorRate) || math.IsInf(errorRate, 0) || errorRate < 0 || errorRate > 1 {
+		if err == nil {
+			err = fmt.Errorf("Prometheus error-rate result %v is outside the supported 0..1 ratio", errorRate)
+		}
+		model.Status.CurrentWeightBPS = 0
+		model.Status.ProgressionState = "Paused"
+		model.Status.Reason = "CanaryProgressionFailed"
+		model.Status.Message = fmt.Sprintf("Canary progression paused and candidate traffic set to 0: %v", err)
+		r.recordEvidenceAndEvent(model, "CanaryProgressionFailed", "CanaryProgressionFailed", model.Status.Message, routeName(model.Name), true)
+		return 0
+	}
+
+	errorRateBPS := int32(errorRate*10000 + 0.5)
+	if errorRateBPS > progression.MaxErrorRateBPS {
+		model.Status.CurrentWeightBPS = 0
+		model.Status.ProgressionState = "Paused"
+		model.Status.Reason = "CanaryProgressionFailed"
+		model.Status.Message = fmt.Sprintf("Canary progression paused and candidate traffic set to 0: Prometheus error rate %d basis points exceeds maximum %d.", errorRateBPS, progression.MaxErrorRateBPS)
+		r.recordEvidenceAndEvent(model, "CanaryProgressionFailed", "CanaryHealthExceeded", model.Status.Message, routeName(model.Name), true)
+		return 0
+	}
+
+	if model.Status.CurrentStep >= int32(len(progression.TrafficStepsBPS)) {
+		model.Status.CurrentWeightBPS = progression.TrafficStepsBPS[len(progression.TrafficStepsBPS)-1]
+		model.Status.ProgressionState = "Completed"
+		model.Status.Reason = "CanaryProgressionCompleted"
+		model.Status.Message = fmt.Sprintf("Canary progression completed at %d basis points candidate traffic; Prometheus error rate was %d basis points.", model.Status.CurrentWeightBPS, errorRateBPS)
+		return 0
+	}
+
+	model.Status.CurrentStep++
+	model.Status.CurrentWeightBPS = progression.TrafficStepsBPS[model.Status.CurrentStep-1]
+	model.Status.ProgressionState = "Observing"
+	started := metav1.NewTime(now)
+	model.Status.CanaryStepStartedAt = &started
+	model.Status.Reason = "CanaryProgressionAdvanced"
+	model.Status.Message = fmt.Sprintf("Prometheus error rate was %d basis points; advanced to canary step %d at %d basis points.", errorRateBPS, model.Status.CurrentStep, model.Status.CurrentWeightBPS)
+	r.recordEvidenceAndEvent(model, "CanaryProgressionAdvanced", "CanaryProgressionAdvanced", model.Status.Message, routeName(model.Name), false)
+	return progression.ObservationWindow.Duration
 }
 
 func (r *RiskModelReconciler) ensureDriftMonitoring(
@@ -878,10 +1097,7 @@ func buildDriftCronJob(model *ledgerv1alpha1.RiskModel) *batchv1.CronJob {
 }
 
 func buildCanaryRoute(model *ledgerv1alpha1.RiskModel, candidateServiceName string) *unstructured.Unstructured {
-	canaryWeight := int64(model.Spec.Serving.CanaryWeightBPS)
-	if model.Annotations[annotationRollbackCanary] == "true" {
-		canaryWeight = 0
-	}
+	canaryWeight := int64(canaryWeightBPS(model))
 	stableWeight := int64(10000 - canaryWeight)
 	route := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "gateway.networking.k8s.io/v1",
@@ -923,6 +1139,27 @@ func buildCanaryRoute(model *ledgerv1alpha1.RiskModel, candidateServiceName stri
 		Group: "gateway.networking.k8s.io", Version: "v1", Kind: "HTTPRoute",
 	})
 	return route
+}
+
+func canaryWeightBPS(model *ledgerv1alpha1.RiskModel) int32 {
+	if model.Annotations[annotationRollbackCanary] == "true" {
+		return 0
+	}
+	progression := model.Spec.Serving.CanaryProgression
+	if progression.Enabled {
+		switch model.Status.ProgressionState {
+		case "Paused", "RolledBack":
+			return 0
+		}
+		if model.Status.CurrentWeightBPS > 0 {
+			return model.Status.CurrentWeightBPS
+		}
+		if len(progression.TrafficStepsBPS) > 0 {
+			return progression.TrafficStepsBPS[0]
+		}
+		return 0
+	}
+	return model.Spec.Serving.CanaryWeightBPS
 }
 
 func validateServingOwnership(object client.Object, model *ledgerv1alpha1.RiskModel) error {

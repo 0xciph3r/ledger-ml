@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"net/url"
 	"reflect"
 	"slices"
 	"strings"
@@ -191,6 +192,8 @@ type ServingConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10000
 	CanaryWeightBPS int32 `json:"canaryWeightBPS,omitempty"`
+	// CanaryProgression controls optional automated canary traffic progression.
+	CanaryProgression CanaryProgression `json:"canaryProgression,omitempty"`
 	// Image is the serving container image.
 	Image string `json:"image,omitempty"`
 	// Replicas is the desired serving replica count.
@@ -202,6 +205,43 @@ type ServingConfig struct {
 	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default=8080
 	Port int32 `json:"port,omitempty"`
+}
+
+// PrometheusQueryConfig identifies the Prometheus instant-query endpoint used
+// to evaluate canary health.
+type PrometheusQueryConfig struct {
+	// URL is the Prometheus HTTP API instant-query endpoint.
+	URL string `json:"url,omitempty"`
+	// Query is the PromQL expression. It must return one scalar/vector value
+	// representing an error-rate ratio in the range 0..1.
+	Query string `json:"query,omitempty"`
+}
+
+// CanaryProgression controls bounded, fail-closed canary traffic progression.
+type CanaryProgression struct {
+	// Enabled toggles automated progression. When false, the configured
+	// canaryWeightBPS and manual rollback annotation retain their existing behavior.
+	Enabled bool `json:"enabled,omitempty"`
+	// ProgressionModel selects the health signal used for progression.
+	// +kubebuilder:validation:Enum=prometheus_query
+	// +kubebuilder:default=prometheus_query
+	ProgressionModel string `json:"progressionModel,omitempty"`
+	// RollbackBehavior controls candidate traffic after an unhealthy or failed query.
+	// +kubebuilder:validation:Enum=zero_candidate
+	// +kubebuilder:default=zero_candidate
+	RollbackBehavior string `json:"rollbackBehavior,omitempty"`
+	// TrafficStepsBPS lists strictly increasing candidate traffic weights.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	TrafficStepsBPS []int32 `json:"trafficStepsBPS,omitempty"`
+	// ObservationWindow is the minimum time a step must remain healthy before advancing.
+	ObservationWindow metav1.Duration `json:"observationWindow,omitempty"`
+	// Prometheus identifies the query endpoint and PromQL health query.
+	Prometheus PrometheusQueryConfig `json:"prometheus,omitempty"`
+	// MaxErrorRateBPS is the largest allowed error-rate ratio in basis points.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
+	MaxErrorRateBPS int32 `json:"maxErrorRateBPS,omitempty"`
 }
 
 // RiskModelLineage captures immutable lineage identity.
@@ -337,6 +377,17 @@ type RiskModelStatus struct {
 	ServingReference string `json:"servingReference,omitempty"`
 	// TrafficReference identifies the Gateway API route after canary configuration.
 	TrafficReference string `json:"trafficReference,omitempty"`
+	// CurrentStep is the one-based automated canary progression step.
+	CurrentStep int32 `json:"currentStep,omitempty"`
+	// CurrentWeightBPS is the candidate traffic currently applied to the route.
+	CurrentWeightBPS int32 `json:"currentWeightBPS,omitempty"`
+	// LastEvaluation records the most recent Prometheus health evaluation.
+	LastEvaluation *metav1.Time `json:"lastEvaluation,omitempty"`
+	// ProgressionState describes automated canary progression: Disabled, Observing,
+	// Completed, or Paused.
+	ProgressionState string `json:"progressionState,omitempty"`
+	// CanaryStepStartedAt records when the current step's observation window began.
+	CanaryStepStartedAt *metav1.Time `json:"canaryStepStartedAt,omitempty"`
 	// DriftMonitoringReference identifies the scheduled drift CronJob.
 	DriftMonitoringReference string `json:"driftMonitoringReference,omitempty"`
 	// DriftReportReference identifies the latest observed drift report.
@@ -399,6 +450,14 @@ func (r *RiskModel) Default() {
 	}
 	if r.Spec.Serving.Mode == "" {
 		r.Spec.Serving.Mode = "Shadow"
+	}
+	if r.Spec.Serving.CanaryProgression.Enabled {
+		if r.Spec.Serving.CanaryProgression.ProgressionModel == "" {
+			r.Spec.Serving.CanaryProgression.ProgressionModel = "prometheus_query"
+		}
+		if r.Spec.Serving.CanaryProgression.RollbackBehavior == "" {
+			r.Spec.Serving.CanaryProgression.RollbackBehavior = "zero_candidate"
+		}
 	}
 	if r.Spec.Policy.ResourceBounds.MaxCPU == "" {
 		r.Spec.Policy.ResourceBounds.MaxCPU = "2"
@@ -579,6 +638,48 @@ func (r *RiskModel) validateErrorList() field.ErrorList {
 		}
 		if strings.TrimSpace(r.Spec.Serving.RouteHost) == "" {
 			allErrs = append(allErrs, field.Required(specPath.Child("serving", "routeHost"), "routeHost is required for canary serving"))
+		}
+	}
+	progression := r.Spec.Serving.CanaryProgression
+	if progression.Enabled {
+		progressionPath := specPath.Child("serving", "canaryProgression")
+		if r.Spec.Serving.Mode != "Canary" {
+			allErrs = append(allErrs, field.Forbidden(progressionPath, "canaryProgression requires serving.mode=Canary"))
+		}
+		if progression.ProgressionModel != "prometheus_query" {
+			allErrs = append(allErrs, field.NotSupported(progressionPath.Child("progressionModel"), progression.ProgressionModel, []string{"prometheus_query"}))
+		}
+		if progression.RollbackBehavior != "zero_candidate" {
+			allErrs = append(allErrs, field.NotSupported(progressionPath.Child("rollbackBehavior"), progression.RollbackBehavior, []string{"zero_candidate"}))
+		}
+		if len(progression.TrafficStepsBPS) == 0 {
+			allErrs = append(allErrs, field.Required(progressionPath.Child("trafficStepsBPS"), "trafficStepsBPS is required when canary progression is enabled"))
+		}
+		if len(progression.TrafficStepsBPS) > 16 {
+			allErrs = append(allErrs, field.TooMany(progressionPath.Child("trafficStepsBPS"), len(progression.TrafficStepsBPS), 16))
+		}
+		previous := int32(0)
+		for i, step := range progression.TrafficStepsBPS {
+			stepPath := progressionPath.Child("trafficStepsBPS").Index(i)
+			if step <= 0 || step > 10000 {
+				allErrs = append(allErrs, field.Invalid(stepPath, step, "traffic step must be between 1 and 10000 basis points"))
+			}
+			if i > 0 && step <= previous {
+				allErrs = append(allErrs, field.Invalid(stepPath, step, "trafficStepsBPS must be strictly increasing"))
+			}
+			previous = step
+		}
+		if progression.ObservationWindow.Duration <= 0 {
+			allErrs = append(allErrs, field.Invalid(progressionPath.Child("observationWindow"), progression.ObservationWindow, "observationWindow must be greater than zero"))
+		}
+		if progression.MaxErrorRateBPS < 0 || progression.MaxErrorRateBPS > 10000 {
+			allErrs = append(allErrs, field.Invalid(progressionPath.Child("maxErrorRateBPS"), progression.MaxErrorRateBPS, "maxErrorRateBPS must be between 0 and 10000"))
+		}
+		if strings.TrimSpace(progression.Prometheus.Query) == "" {
+			allErrs = append(allErrs, field.Required(progressionPath.Child("prometheus", "query"), "prometheus.query is required"))
+		}
+		if parsed, err := url.Parse(strings.TrimSpace(progression.Prometheus.URL)); err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			allErrs = append(allErrs, field.Invalid(progressionPath.Child("prometheus", "url"), progression.Prometheus.URL, "prometheus.url must be an absolute HTTP or HTTPS URL"))
 		}
 	}
 

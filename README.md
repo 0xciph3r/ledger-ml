@@ -102,9 +102,38 @@ Implemented in this milestone:
 - With `serving.mode=Canary`, the operator creates a Gateway API `HTTPRoute` that
   references an existing stable Service and the promoted candidate Service. Traffic
   is expressed in basis points and defaults to zero candidate traffic.
+- Automated canary progression is opt-in with `serving.canaryProgression.enabled=true`.
+  The supported progression model is `prometheus_query` and the fail-closed rollback
+  behavior is `zero_candidate`. Configure strictly increasing `trafficStepsBPS`, a
+  positive `observationWindow`, a Prometheus instant-query `url` and `query`, and
+  the maximum healthy `maxErrorRateBPS` (for example, `100` means 1%):
+
+  ```yaml
+  serving:
+    enabled: true
+    mode: Canary
+    canaryProgression:
+      enabled: true
+      progressionModel: prometheus_query
+      rollbackBehavior: zero_candidate
+      trafficStepsBPS: [100, 1000, 10000]
+      observationWindow: 10m
+      prometheus:
+        url: http://prometheus.monitoring.svc/api/v1/query
+        query: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))
+      maxErrorRateBPS: 100
+  ```
+
+  The query must return one Prometheus scalar/vector value containing an error-rate
+  ratio from 0 to 1. A failed query, malformed result, or threshold breach sets
+  candidate traffic to zero, records a warning/evidence failure, and pauses
+  progression. The controller advances only after the full observation window and
+  a healthy query. Status exposes `currentStep`, `currentWeightBPS`,
+  `lastEvaluation`, and `progressionState`.
 - Setting annotation `ledger.ledgerml.io/rollback-canary: "true"` forces the route
   to 100% stable and 0% candidate traffic without changing model lineage. This is
-  an explicit, auditable rollback control.
+  an explicit, auditable rollback control and takes precedence over automated
+  progression.
 - Policy gate before Job creation. Unsafe resource declarations are rejected with clear status/events.
 - Status mapping from Job + governance state to phases:
   `Rejected`, `PreparationPending`, `PreparationRunning`, `PreparationSucceeded`,
