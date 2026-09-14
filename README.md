@@ -543,6 +543,14 @@ tolerations, and priority classes are copied consistently to training, preparati
 evaluation, drift, and serving Pods. Resource bounds remain the safety control; queueing
 and utilization-based recommendations are a later integration point.
 
+### Batch queueing
+
+Set `spec.scheduling.queueName` to opt training, preparation, evaluation, and drift
+Jobs into a Kueue `LocalQueue`. Serving Deployments are never queued. The
+`config/kueue` examples define a CPU/memory/GPU `ClusterQueue` and a default-namespace
+`LocalQueue`; install Kueue first and tune quotas, flavors, and namespace selectors for
+the cluster. Leaving `queueName` empty preserves direct Kubernetes scheduling.
+
 Not implemented yet (later milestones): continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
 

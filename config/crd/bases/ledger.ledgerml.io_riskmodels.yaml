@@ -682,6 +682,10 @@ spec:
                     - gpu-training
                     - latency-sensitive
                     type: string
+                  queueName:
+                    description: QueueName optionally opts batch workloads into a
+                      Kueue LocalQueue.
+                    type: string
                   tolerations:
                     description: Tolerations permits placement on tainted specialized
                       nodes.

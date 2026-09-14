@@ -57,6 +57,7 @@ const (
 	evaluationContainerName   = "evaluator"
 	labelRiskModelName        = "ledger.ledgerml.io/riskmodel"
 	labelComponent            = "ledger.ledgerml.io/component"
+	labelKueueQueue           = "kueue.x-k8s.io/queue-name"
 	labelServingName          = "ledger.ledgerml.io/serving"
 	componentTraining         = "training"
 	componentPreparation      = "preparation"
@@ -1051,6 +1052,7 @@ func buildDriftCronJob(model *ledgerv1alpha1.RiskModel) *batchv1.CronJob {
 		labelRiskModelName: model.Name,
 		labelComponent:     "drift-monitoring",
 	}
+	applyBatchQueueLabel(labels, model)
 	backoffLimit := int32(1)
 	psiThreshold := float64(model.Spec.DriftMonitoring.PSIThresholdBPS) / 10000
 	missingThreshold := float64(model.Spec.DriftMonitoring.MissingRateDeltaBPS) / 10000
@@ -1256,6 +1258,7 @@ func buildPreparationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 		labelRiskModelName: model.Name,
 		labelComponent:     componentPreparation,
 	}
+	applyBatchQueueLabel(labels, model)
 	backoffLimit := int32(1)
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1303,6 +1306,7 @@ func buildEvaluationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 		labelRiskModelName: model.Name,
 		labelComponent:     componentEvaluation,
 	}
+	applyBatchQueueLabel(labels, model)
 	backoffLimit := int32(1)
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1352,6 +1356,7 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 		labelRiskModelName: model.Name,
 		labelComponent:     componentTraining,
 	}
+	applyBatchQueueLabel(labels, model)
 
 	backoffLimit := int32(1)
 	lineage := lineageHash(model)
@@ -1411,6 +1416,12 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 				},
 			},
 		},
+	}
+}
+
+func applyBatchQueueLabel(labels map[string]string, model *ledgerv1alpha1.RiskModel) {
+	if model.Spec.Scheduling.QueueName != "" {
+		labels[labelKueueQueue] = model.Spec.Scheduling.QueueName
 	}
 }
 

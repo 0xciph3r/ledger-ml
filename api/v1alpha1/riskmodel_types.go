@@ -306,6 +306,8 @@ type SchedulingConfig struct {
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 	// Tolerations permits placement on tainted specialized nodes.
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// QueueName optionally opts batch workloads into a Kueue LocalQueue.
+	QueueName string `json:"queueName,omitempty"`
 }
 
 // ModelApproval captures a human approval statement.

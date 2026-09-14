@@ -256,6 +256,27 @@ func TestShadowServiceExposesHTTPAndMetricsPorts(t *testing.T) {
 	}
 }
 
+func TestBatchWorkloadsOptIntoQueueTableDriven(t *testing.T) {
+	cases := []struct {
+		name      string
+		queueName string
+		wantLabel string
+	}{
+		{name: "queue disabled"},
+		{name: "queue enabled", queueName: "ledger-ml-batch", wantLabel: "ledger-ml-batch"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := validRiskModel()
+			model.Spec.Scheduling.QueueName = tc.queueName
+			job := buildTrainingJob(model)
+			if got := job.Labels[labelKueueQueue]; got != tc.wantLabel {
+				t.Fatalf("expected queue label %q, got %q", tc.wantLabel, got)
+			}
+		})
+	}
+}
+
 func TestDriftCronJobUsesVersionedBaselineAndThresholdContract(t *testing.T) {
 	cases := []struct {
 		name       string
