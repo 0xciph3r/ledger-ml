@@ -653,6 +653,8 @@ func TestShadowServingUsesApprovedArtifactWithoutExternalRoute(t *testing.T) {
 	model.Spec.Serving.Enabled = true
 	model.Spec.Serving.Image = "ghcr.io/ledger-ml/inference:latest"
 	model.Spec.Serving.Mode = "Shadow"
+	model.Spec.Scheduling.NodeSelector = map[string]string{"workload": "inference"}
+	model.Spec.Scheduling.PriorityClassName = "ledger-ml-serving"
 
 	deployment := buildShadowDeployment(model)
 	if deployment.Spec.Replicas == nil || *deployment.Spec.Replicas != 1 {
@@ -663,6 +665,10 @@ func TestShadowServingUsesApprovedArtifactWithoutExternalRoute(t *testing.T) {
 	}
 	if deployment.Spec.Template.Spec.Containers[0].Env[len(deployment.Spec.Template.Spec.Containers[0].Env)-1].Value != "shadow" {
 		t.Fatalf("expected shadow serving mode")
+	}
+	if deployment.Spec.Template.Spec.NodeSelector["workload"] != "inference" ||
+		deployment.Spec.Template.Spec.PriorityClassName != "ledger-ml-serving" {
+		t.Fatalf("expected scheduling intent on serving pod, got %#v", deployment.Spec.Template.Spec)
 	}
 
 	service := buildShadowService(model)

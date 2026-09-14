@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -192,6 +194,43 @@ func TestRiskModelCanaryProgressionValidationIsTableDriven(t *testing.T) {
 			}
 			tc.mutate(&spec.Serving.CanaryProgression)
 			model := &RiskModel{Spec: spec}
+			model.Default()
+			err := model.ValidateCreate()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("expected validation error=%v, got %v", tc.wantError, err)
+			}
+		})
+	}
+}
+
+func TestRiskModelSchedulingProfilesAreTableDriven(t *testing.T) {
+	cases := []struct {
+		name      string
+		profile   string
+		serving   bool
+		gpuLimit  string
+		wantError bool
+	}{
+		{name: "cpu general", profile: "cpu-general"},
+		{name: "memory optimized", profile: "memory-optimized"},
+		{name: "gpu requires gpu limit", profile: "gpu-training", wantError: true},
+		{name: "gpu training", profile: "gpu-training", gpuLimit: "1"},
+		{name: "latency requires serving", profile: "latency-sensitive", wantError: true},
+		{name: "latency serving", profile: "latency-sensitive", serving: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &RiskModel{Spec: validRiskModelSpec()}
+			model.Spec.Scheduling.Profile = tc.profile
+			model.Spec.Serving.Enabled = tc.serving
+			if tc.serving {
+				model.Spec.Serving.Image = "ghcr.io/ledger-ml/serving:latest"
+			}
+			if tc.gpuLimit != "" {
+				model.Spec.Resources.Limits = corev1.ResourceList{
+					corev1.ResourceName("nvidia.com/gpu"): resource.MustParse(tc.gpuLimit),
+				}
+			}
 			model.Default()
 			err := model.ValidateCreate()
 			if (err != nil) != tc.wantError {

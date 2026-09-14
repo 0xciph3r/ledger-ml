@@ -1071,7 +1071,10 @@ func buildDriftCronJob(model *ledgerv1alpha1.RiskModel) *batchv1.CronJob {
 					Template: corev1.PodTemplateSpec{
 						ObjectMeta: metav1.ObjectMeta{Labels: labels},
 						Spec: corev1.PodSpec{
-							RestartPolicy: corev1.RestartPolicyNever,
+							NodeSelector:      model.Spec.Scheduling.NodeSelector,
+							Tolerations:       model.Spec.Scheduling.Tolerations,
+							PriorityClassName: model.Spec.Scheduling.PriorityClassName,
+							RestartPolicy:     corev1.RestartPolicyNever,
 							Containers: []corev1.Container{{
 								Name:      "drift-detector",
 								Image:     model.Spec.DriftMonitoring.Image,
@@ -1190,6 +1193,9 @@ func buildShadowDeployment(model *ledgerv1alpha1.RiskModel) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
+					NodeSelector:      model.Spec.Scheduling.NodeSelector,
+					Tolerations:       model.Spec.Scheduling.Tolerations,
+					PriorityClassName: model.Spec.Scheduling.PriorityClassName,
 					Containers: []corev1.Container{{
 						Name: "inference", Image: model.Spec.Serving.Image,
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: model.Spec.Serving.Port}},
@@ -1265,7 +1271,10 @@ func buildPreparationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					NodeSelector:      model.Spec.Scheduling.NodeSelector,
+					Tolerations:       model.Spec.Scheduling.Tolerations,
+					PriorityClassName: model.Spec.Scheduling.PriorityClassName,
+					RestartPolicy:     corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
 						Name:      preparationContainerName,
 						Image:     model.Spec.Preparation.Image,
@@ -1309,7 +1318,10 @@ func buildEvaluationJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					NodeSelector:      model.Spec.Scheduling.NodeSelector,
+					Tolerations:       model.Spec.Scheduling.Tolerations,
+					PriorityClassName: model.Spec.Scheduling.PriorityClassName,
+					RestartPolicy:     corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
 						Name:         evaluationContainerName,
 						Image:        model.Spec.Evaluation.Image,
@@ -1370,7 +1382,10 @@ func buildTrainingJob(model *ledgerv1alpha1.RiskModel) *batchv1.Job {
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					NodeSelector:      model.Spec.Scheduling.NodeSelector,
+					Tolerations:       model.Spec.Scheduling.Tolerations,
+					PriorityClassName: model.Spec.Scheduling.PriorityClassName,
+					RestartPolicy:     corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
 							Name:         trainingContainerName,

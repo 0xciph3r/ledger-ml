@@ -294,6 +294,20 @@ type GovernancePolicy struct {
 	Approval       ApprovalPolicy       `json:"approval,omitempty"`
 }
 
+// SchedulingConfig expresses placement intent without mutating resource requests.
+type SchedulingConfig struct {
+	// Profile selects a governed workload placement class.
+	// +kubebuilder:validation:Enum=cpu-general;memory-optimized;gpu-training;latency-sensitive
+	// +kubebuilder:default=cpu-general
+	Profile string `json:"profile,omitempty"`
+	// PriorityClassName optionally selects a cluster-defined workload priority.
+	PriorityClassName string `json:"priorityClassName,omitempty"`
+	// NodeSelector constrains workloads to compatible node labels.
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+	// Tolerations permits placement on tainted specialized nodes.
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+}
+
 // ModelApproval captures a human approval statement.
 type ModelApproval struct {
 	// Approver is the identity of the approver (user/group alias).
@@ -337,6 +351,8 @@ type RiskModelSpec struct {
 	Serving ServingConfig `json:"serving,omitempty"`
 	// Policy controls resource safety and approval semantics.
 	Policy GovernancePolicy `json:"policy,omitempty"`
+	// Scheduling controls governed placement intent for created workloads.
+	Scheduling SchedulingConfig `json:"scheduling,omitempty"`
 	// Approvals are explicit human approvals observed by the controller.
 	Approvals []ModelApproval `json:"approvals,omitempty"`
 }
@@ -467,6 +483,9 @@ func (r *RiskModel) Default() {
 	}
 	if r.Spec.Policy.ResourceBounds.MaxGPU == "" {
 		r.Spec.Policy.ResourceBounds.MaxGPU = "0"
+	}
+	if r.Spec.Scheduling.Profile == "" {
+		r.Spec.Scheduling.Profile = "cpu-general"
 	}
 	if r.Spec.Policy.Approval.Required == nil {
 		required := true
@@ -696,6 +715,18 @@ func (r *RiskModel) validateErrorList() field.ErrorList {
 	if r.ApprovalRequired() && r.Spec.Policy.Approval.MinimumApprovals < 1 {
 		allErrs = append(allErrs, field.Invalid(specPath.Child("policy", "approval", "minimumApprovals"), r.Spec.Policy.Approval.MinimumApprovals, "minimumApprovals must be >= 1 when approval is required"))
 	}
+	switch r.Spec.Scheduling.Profile {
+	case "cpu-general", "memory-optimized", "gpu-training", "latency-sensitive":
+	default:
+		allErrs = append(allErrs, field.NotSupported(specPath.Child("scheduling", "profile"), r.Spec.Scheduling.Profile, []string{"cpu-general", "memory-optimized", "gpu-training", "latency-sensitive"}))
+	}
+	gpuLimit := r.Spec.Resources.Limits[corev1.ResourceName("nvidia.com/gpu")]
+	if r.Spec.Scheduling.Profile == "gpu-training" && (gpuLimit.IsZero() || gpuLimit.Sign() < 0) {
+		allErrs = append(allErrs, field.Invalid(specPath.Child("scheduling", "profile"), r.Spec.Scheduling.Profile, "gpu-training requires resources.limits.nvidia.com/gpu"))
+	}
+	if r.Spec.Scheduling.Profile == "latency-sensitive" && !r.Spec.Serving.Enabled {
+		allErrs = append(allErrs, field.Invalid(specPath.Child("scheduling", "profile"), r.Spec.Scheduling.Profile, "latency-sensitive requires serving.enabled=true"))
+	}
 
 	approvers := slices.Clone(r.Spec.Policy.Approval.AllowedApprovers)
 	slices.Sort(approvers)
@@ -740,6 +771,7 @@ func (r *RiskModel) validateImmutableFields(old runtime.Object) field.ErrorList 
 		{path: "resources", old: oldModel.Spec.Resources, new: r.Spec.Resources},
 		{path: "serving", old: oldModel.Spec.Serving, new: r.Spec.Serving},
 		{path: "policy", old: oldModel.Spec.Policy, new: r.Spec.Policy},
+		{path: "scheduling", old: oldModel.Spec.Scheduling, new: r.Spec.Scheduling},
 	}
 
 	for _, check := range immutableChecks {

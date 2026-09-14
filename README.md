@@ -533,6 +533,16 @@ The serving Service exposes both the HTTP and metrics ports, while the
 minutes. Install Prometheus Operator and adjust the namespace/selector labels to
 match the cluster's monitoring stack.
 
+### Resource-aware scheduling
+
+`spec.scheduling` makes placement intent explicit without silently rewriting resource
+requests. Supported profiles are `cpu-general`, `memory-optimized`, `gpu-training`,
+and `latency-sensitive`. The API rejects GPU profiles without a GPU limit and rejects
+latency-sensitive profiles unless serving is enabled. Optional node selectors,
+tolerations, and priority classes are copied consistently to training, preparation,
+evaluation, drift, and serving Pods. Resource bounds remain the safety control; queueing
+and utilization-based recommendations are a later integration point.
+
 Not implemented yet (later milestones): continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
 
