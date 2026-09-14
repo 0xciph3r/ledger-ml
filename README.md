@@ -578,6 +578,21 @@ make build       # compile manager binary
 make training-test # run trainer unit tests (requires Python deps)
 ```
 
+## CI/CD
+
+GitHub Actions provides two deliberately separate paths:
+
+- `.github/workflows/ci.yml` runs Go and Python tests, regenerates CRDs and
+  deepcopy code, validates Kubernetes assets, and builds all workload images on
+  pull requests and pushes to `main`.
+- `.github/workflows/release.yml` is manually dispatched with an immutable version
+  tag. It publishes trainer, evaluator, serving, and monitoring images to GHCR with
+  provenance/SBOM metadata, then scans them for high and critical vulnerabilities.
+
+The release workflow does not deploy to production. Kubernetes promotion remains a
+separate, explicitly approved step using the published image digests and the existing
+model evaluation, approval, and canary policies.
+
 ## Code structure and operator concepts
 
 - `api/v1alpha1/`: CRD-facing domain model (`spec` = desired state, `status` = observed state).
