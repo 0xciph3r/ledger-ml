@@ -54,7 +54,7 @@ make the model version, training inputs, evaluation result, and deployment state
 These are deliberate exclusions. The MVP should teach the lifecycle and establish
 production-quality boundaries before adding scale.
 
-## Current implementation status (Milestone 5: double-entry ledger snapshot adapter + feature contract)
+## Current implementation status (Milestone 7: governed preparation and training stages)
 
 Implemented in this milestone:
 
@@ -64,8 +64,11 @@ Implemented in this milestone:
   - task
   - training image
   - dataset reference
+  - optional dataset preparation image, curated dataset output, and resources
+  - optional evaluation image, resource policy, and measurable quality gates
   - model artifact/output reference
-  - immutable lineage identity (`trainingImageDigest`, dataset/output versions, config digest)
+  - immutable lineage identity (`trainingImageDigest`, source/prepared dataset versions,
+    dataset/output versions, config digest)
   - resource requests/limits
   - serving configuration
   - governance policy (resource bounds + approval semantics)
@@ -78,13 +81,36 @@ Implemented in this milestone:
   - approvers counted toward policy
   - governance evidence records
   - model version (reserved for later milestones)
+  - immutable promotion record reference and timestamp
   - reason/message
-- Idempotent reconciler that creates a single owned `batch/v1` training Job per
-  `RiskModel` and does not recreate it on every reconcile.
+- Idempotent reconciler that creates a single owned preparation Job and training Job
+  per `RiskModel` when preparation is enabled, and does not recreate either on every
+  reconcile.
+- Training is blocked until preparation succeeds; the training Job consumes the
+  curated dataset reference and prepared dataset version rather than the raw source.
+- Approval is blocked until the optional evaluation Job succeeds. The evaluator
+  receives minimum recall, minimum PR-AUC, and maximum false-negative gates and
+  must exit successfully only when the artifact passes them.
+- Once approved, an immutable ConfigMap promotion record is created with the exact
+  artifact reference and lineage hash. Serving rollout is intentionally separate.
+- When `serving.enabled=true`, the operator creates an internal ClusterIP Service
+  and shadow Deployment using the approved artifact. No ingress, external route, or
+  production traffic switch is created.
+- The reference CPU inference service is in `serving/`. It exposes `/healthz`,
+  `/readyz`, `/predict`, and Prometheus-compatible `/metrics`, and returns the
+  model version and lineage hash with every prediction.
+- With `serving.mode=Canary`, the operator creates a Gateway API `HTTPRoute` that
+  references an existing stable Service and the promoted candidate Service. Traffic
+  is expressed in basis points and defaults to zero candidate traffic.
+- Setting annotation `ledger.ledgerml.io/rollback-canary: "true"` forces the route
+  to 100% stable and 0% candidate traffic without changing model lineage. This is
+  an explicit, auditable rollback control.
 - Policy gate before Job creation. Unsafe resource declarations are rejected with clear status/events.
 - Status mapping from Job + governance state to phases:
-  `Rejected`, `TrainingPending`, `TrainingRunning`, `TrainingSucceeded`,
-  `TrainingFailed`, `AwaitingApproval`, `Approved`.
+  `Rejected`, `PreparationPending`, `PreparationRunning`, `PreparationSucceeded`,
+  `PreparationFailed`, `TrainingPending`, `TrainingRunning`, `TrainingSucceeded`,
+  `TrainingFailed`, `EvaluationPending`, `EvaluationRunning`,
+  `EvaluationSucceeded`, `EvaluationFailed`, `AwaitingApproval`, `Approved`.
 - Structured audit evidence + Kubernetes Events for key decisions:
   accepted/rejected, job created, training observed/failed, approval observed.
 - Real `training/` Python project with deterministic synthetic fraud data generation,
@@ -92,6 +118,11 @@ Implemented in this milestone:
   and machine-readable evaluation/lineage JSON.
 - Sanitized double-entry ledger snapshot adapter with strict accounting validation,
   proxy-label generation, leakage guardrails, and stable transaction-level feature extraction.
+- Deterministic dataset preparation command that writes separate feature/label files
+  and a content-addressed manifest with source lineage, point-in-time cutoff, quality
+  counts, schema versions, and double-entry validation evidence.
+- Executable evaluator workload in `training/Dockerfile.evaluator` that validates
+  `evaluation-lineage.json` and exits nonzero when a quality gate fails.
 - Focused unit tests for API/controller behavior plus trainer determinism, imbalance,
   required features, metrics output, missing environment validation, and snapshot invariants.
 
@@ -111,6 +142,38 @@ The Job injects these environment variables from `RiskModel.spec`:
 - `LEDGERML_TRAINING_IMAGE_DIGEST`
 - `LEDGERML_CONFIGURATION_DIGEST`
 
+When preparation is enabled, the preparation Job additionally receives:
+
+- `LEDGERML_PREPARATION_OUTPUT_KIND`
+- `LEDGERML_PREPARATION_OUTPUT_NAME`
+- `LEDGERML_PREPARATION_OUTPUT_PATH`
+- `LEDGERML_PREPARED_DATASET_VERSION`
+
+The preparation Job receives the raw `LEDGERML_DATASET_*` values. The training Job
+receives the curated preparation output and `LEDGERML_PREPARED_DATASET_VERSION`.
+Preparation is disabled by default to preserve the synthetic MVP path.
+
+When evaluation is enabled, the evaluator Job additionally receives:
+
+- `LEDGERML_EVALUATION_PATH`
+- `LEDGERML_EVALUATION_MIN_RECALL`
+- `LEDGERML_EVALUATION_MIN_PR_AUC`
+- `LEDGERML_EVALUATION_MAX_FALSE_NEGATIVES`
+
+The evaluator reads the trainer's `evaluation-lineage.json`. Missing or malformed
+metrics fail closed, and a threshold violation exits nonzero so Kubernetes records
+the evaluation Job as failed.
+
+Evaluation thresholds are represented as integer basis points in the Kubernetes API
+to avoid floating-point CRD portability problems:
+
+- `minRecallBPS: 8000` means recall must be at least `0.80`.
+- `minPRAUCBPS: 3500` means PR-AUC must be at least `0.35`.
+- `maxFalseNegatives: 7` caps false negatives in the evaluation report.
+
+Zero disables an individual threshold. A failed evaluator Job is a failed quality
+gate, not an approval request.
+
 Dataset selection is now controlled by `LEDGERML_DATASET_KIND`:
 
 - `LocalPath` (existing synthetic path)
@@ -121,6 +184,91 @@ milestone; the training image entrypoint defines execution behavior.
 
 The trainer now uses this contract to generate synthetic transactions, train a real
 fraud classifier, and emit immutable outputs.
+
+## CPU inference service
+
+The serving container loads the immutable `model.joblib` artifact using:
+
+- `LEDGERML_MODEL_PATH`
+- `LEDGERML_OUTPUT_ARTIFACT_VERSION`
+- `LEDGERML_LINEAGE_HASH`
+
+`POST /predict` accepts a JSON object containing the exact trained feature set:
+
+```json
+{
+  "features": {
+    "amount": 125.0,
+    "hour": 13.0,
+    "merchant_risk": 0.2,
+    "distance_km": 4.0,
+    "tx_count_1h": 1.0,
+    "tx_count_24h": 3.0,
+    "device_risk": 0.1
+  }
+}
+```
+
+The service rejects missing, unknown, boolean, non-numeric, and non-finite feature
+values. It does not log raw requests. The initial implementation is intentionally
+CPU-oriented; GPU serving will be justified later with measured latency and cost data.
+
+## Drift detection foundation
+
+The `monitoring/` package establishes a training baseline and compares later feature
+windows against it. The first detector covers:
+
+- Missing-column and missing-value-rate changes.
+- Numeric feature distribution changes using PSI-style comparisons.
+- Model and dataset version identity in every report.
+
+Example:
+
+```bash
+PYTHONPATH=monitoring python monitoring/build_baseline.py \
+  --features curated/features.csv \
+  --model-version fraud-model-v1 \
+  --dataset-version curated-dataset-v1 \
+  --output baselines/fraud-model-v1.json
+
+PYTHONPATH=monitoring python monitoring/detect_drift.py \
+  --baseline baselines/fraud-model-v1.json \
+  --current-features windows/current.csv \
+  --output reports/drift.json
+```
+
+The operator can now schedule the detector as an owned Kubernetes CronJob through
+`spec.driftMonitoring`. It passes the immutable model version, baseline/current data
+references, and thresholds into each run. The detector report is consumed from a
+configured ConfigMap reference and reflected in `RiskModel.status` and governance
+evidence. Drift signals investigation or candidate retraining; it does not
+automatically promote a new model.
+
+## Outcome monitoring
+
+The `monitoring/ledgerml_monitoring/outcomes.py` module evaluates delayed operational
+outcomes against versioned predictions:
+
+```bash
+PYTHONPATH=monitoring python monitoring/evaluate_outcomes.py \
+  --predictions windows/predictions.csv \
+  --outcomes windows/outcomes.csv \
+  --model-version fraud-model-v1 \
+  --output reports/outcomes.json
+```
+
+The join is keyed by `transaction_id`, requires one prediction and at most one
+outcome per transaction, and reports coverage, precision, recall, and a confusion
+matrix. Unmatched predictions remain visible as delayed-label coverage rather than
+being silently treated as negative outcomes. Outcome fields are monitoring labels
+only and never become inference features.
+
+An optional `spec.outcomeMonitoring` report reference lets the operator consume the
+JSON report from a ConfigMap. It validates the report model version, publishes
+coverage and recall in basis points through `RiskModel.status`, and sets an
+`OutcomeQuality` condition. Minimum coverage and recall thresholds are observational
+quality policies; a breach records evidence but does not automatically retrain,
+rollback, or promote a model.
 
 ## Double-entry ledger snapshot adapter (sanitized local fixture only)
 
@@ -158,6 +306,29 @@ Double-entry validations enforced before feature extraction:
 - single currency per transaction and currency consistency across ledger/account/entry
 
 Invalid snapshots fail fast with explicit errors.
+
+### Dataset preparation boundary
+
+The snapshot adapter is the source-validation boundary. The preparation command
+turns a validated snapshot into a curated dataset for a separate training stage:
+
+```bash
+PYTHONPATH=training python3 training/prepare_dataset.py \
+  --snapshot training/tests/fixtures/double_entry_snapshot \
+  --output training/tests/.artifacts/curated \
+  --source-version double-entry-snapshot-v1
+```
+
+The output contains:
+
+- `features.csv` with transaction identifiers and leakage-safe feature columns.
+- `labels.csv` with labels kept separate from features.
+- `dataset-manifest.json` with source digest, point-in-time cutoff, schema versions,
+  row counts, validation results, label definition, and curated content digest.
+
+This local contract mirrors the intended AWS boundary: RDS/DMS data lands in raw
+storage, Glue performs validation and transformation, and the training Job consumes
+only the immutable curated dataset plus its manifest.
 
 ### Proxy labels and leakage boundary
 
@@ -287,8 +458,9 @@ Container execution uses the same `LEDGERML_*` contract values as above.
    The controller only marks `Approved` when explicit approval records satisfy policy.
 4. **No self-approval by controller**: approvals are read from `spec.approvals`; the
    controller does not write approvals on your behalf.
-5. **No production-ready claim yet**: `Ready` remains false with `PromotionNotImplemented`
-   until serving/promotion milestones exist.
+5. **Promotion is a separate handoff**: after approval and evaluation, the controller
+   creates an immutable promotion record pointing to the exact artifact and lineage.
+   This does not deploy serving traffic.
 
 ### Evidence boundaries
 
@@ -300,7 +472,7 @@ Container execution uses the same `LEDGERML_*` contract values as above.
   controller-level enforcement and should be hardened with webhooks in a later milestone.
 
 Not implemented yet (later milestones): drift detection, continuous retraining, real
-external data integrations, feature store, inference deployment, object storage/cloud
+external data integrations, feature store, GPU serving, object storage/cloud
 integration, or cryptographic attestation.
 
 This milestone is a reproducible teaching model and governance baseline, not production
