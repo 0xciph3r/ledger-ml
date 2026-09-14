@@ -15,6 +15,7 @@ import (
 
 	ledgerv1alpha1 "github.com/ledger-ml/ledger-ml/api/v1alpha1"
 	"github.com/ledger-ml/ledger-ml/internal/controller"
+	ledgervalidation "github.com/ledger-ml/ledger-ml/internal/webhook"
 )
 
 func main() {
@@ -58,6 +59,14 @@ func main() {
 		Recorder: mgr.GetEventRecorderFor("riskmodel-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		klog.ErrorS(err, "unable to create controller", "controller", "RiskModel")
+		os.Exit(1)
+	}
+
+	if err := ctrl.NewWebhookManagedBy(mgr).
+		For(&ledgerv1alpha1.RiskModel{}).
+		WithValidator(&ledgervalidation.RiskModelValidator{}).
+		Complete(); err != nil {
+		klog.ErrorS(err, "unable to create RiskModel validating webhook")
 		os.Exit(1)
 	}
 

@@ -10,7 +10,7 @@ generate:
 
 .PHONY: manifests
 manifests:
-	$(CONTROLLER_GEN) crd:crdVersions=v1 paths="./api/..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) crd:crdVersions=v1 webhook paths="./api/..." output:crd:artifacts:config=config/crd/bases output:webhook:artifacts:config=config/webhook
 
 .PHONY: test
 test: generate

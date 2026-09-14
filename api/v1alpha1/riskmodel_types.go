@@ -369,6 +369,7 @@ type RiskModelStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.modelVersion`
 
+// +kubebuilder:webhook:verbs=create;update,path=/validate-ledger-ledgerml-io-v1alpha1-riskmodel,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=ledger.ledgerml.io,resources=riskmodels,versions=v1alpha1,name=vriskmodel.kb.io,sideEffects=None,admissionReviewVersions=v1
 // RiskModel is the Schema for the riskmodels API.
 type RiskModel struct {
 	metav1.TypeMeta   `json:",inline"`

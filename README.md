@@ -485,8 +485,10 @@ Container execution uses the same `LEDGERML_*` contract values as above.
 - Evidence intentionally excludes raw transaction payloads, labels, or other PII.
 - This is operational governance evidence, **not** regulatory certification and **not**
   cryptographic/non-repudiation proof yet.
-- Admission webhook enforcement is not installed yet; immutable lineage is currently
-  controller-level enforcement and should be hardened with webhooks in a later milestone.
+- A validating admission webhook now enforces the same create/update contract before
+  reconciliation. The controller retains its checks as defense in depth. Production
+  deployment still requires serving the webhook with a trusted certificate and
+  registering the generated validating webhook configuration.
 
 Not implemented yet (later milestones): continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
