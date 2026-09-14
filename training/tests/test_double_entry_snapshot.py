@@ -9,6 +9,10 @@ from training.ledgerml_training.double_entry_snapshot import (
     SnapshotContractError,
     load_double_entry_snapshot,
 )
+from training.ledgerml_training.dataset_preparation import (
+    CURATED_DATASET_SCHEMA_VERSION,
+    prepare_double_entry_dataset,
+)
 
 
 FIXTURE_ROOT = Path("training/tests/fixtures/double_entry_snapshot")
@@ -115,6 +119,32 @@ class DoubleEntrySnapshotTests(unittest.TestCase):
 
         self.assertTrue(dataset_a.features.equals(dataset_b.features))
         self.assertListEqual(dataset_a.labels.tolist(), dataset_b.labels.tolist())
+
+    def test_preparation_writes_curated_dataset_and_manifest(self) -> None:
+        snapshot_path = self._copy_fixture("prepared")
+        output_path = self.test_root / "curated"
+        result = prepare_double_entry_dataset(
+            str(snapshot_path),
+            str(output_path),
+            "snapshot-v2026-09-13",
+        )
+
+        self.assertTrue(result["features_path"].exists())
+        self.assertTrue(result["labels_path"].exists())
+        self.assertTrue(result["manifest_path"].exists())
+        manifest = result["manifest"]
+        self.assertEqual(manifest["schema_version"], CURATED_DATASET_SCHEMA_VERSION)
+        self.assertEqual(manifest["source"]["version"], "snapshot-v2026-09-13")
+        self.assertEqual(manifest["quality"]["row_count"], 12)
+        self.assertEqual(manifest["quality"]["rejected_record_count"], 0)
+        self.assertTrue(manifest["content_digest"].startswith("sha256:"))
+
+        features = pd.read_csv(result["features_path"])
+        labels = pd.read_csv(result["labels_path"])
+        self.assertEqual(features.columns[0], "transaction_id")
+        self.assertNotIn("settlement_state", features.columns)
+        self.assertNotIn("proxy_label", features.columns)
+        self.assertEqual(list(labels.columns), ["transaction_id", "label"])
 
 
 if __name__ == "__main__":

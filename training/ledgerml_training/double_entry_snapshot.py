@@ -411,6 +411,7 @@ def load_double_entry_snapshot(dataset_path: str) -> SnapshotDataset:
         "label_caveat": "Proxy risk labels are operational outcomes, not confirmed fraud ground truth.",
         "feature_names": list(DOUBLE_ENTRY_FEATURE_NAMES),
         "transaction_ids_order": [record["transaction_id"] for record in records],
+        "transaction_created_at": [record["created_at"] for record in records],
         "record_count": int(len(records)),
         "positive_label_count": int(labels.sum()),
         "currency_contract": "single currency per transaction; mixed currencies disallowed in this milestone",
