@@ -495,6 +495,15 @@ Deployment to mount the generated certificate at controller-runtime's default pa
 Install cert-manager before applying these resources, or replace the Issuer and
 Certificate resources with the cluster's existing certificate provisioning system.
 
+### Prometheus integration
+
+`config/monitoring` contains Prometheus Operator resources for the serving path.
+The serving Service exposes both the HTTP and metrics ports, while the
+`ServiceMonitor` scrapes `/metrics` every 30 seconds. The included
+`PrometheusRule` alerts when a model's inference error ratio exceeds 5% for 10
+minutes. Install Prometheus Operator and adjust the namespace/selector labels to
+match the cluster's monitoring stack.
+
 Not implemented yet (later milestones): continuous retraining, real external data
 integrations, feature store, GPU serving, or cryptographic attestation.
 

@@ -244,6 +244,17 @@ func TestArtifactWorkloadContractsAreTableDriven(t *testing.T) {
 	}
 }
 
+func TestShadowServiceExposesHTTPAndMetricsPorts(t *testing.T) {
+	model := validRiskModel()
+	service := buildShadowService(model)
+	if len(service.Spec.Ports) != 2 {
+		t.Fatalf("expected HTTP and metrics ports, got %#v", service.Spec.Ports)
+	}
+	if service.Spec.Ports[0].Name != "http" || service.Spec.Ports[1].Name != "metrics" {
+		t.Fatalf("unexpected service ports: %#v", service.Spec.Ports)
+	}
+}
+
 func TestDriftCronJobUsesVersionedBaselineAndThresholdContract(t *testing.T) {
 	cases := []struct {
 		name       string

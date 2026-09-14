@@ -993,7 +993,10 @@ func buildShadowService(model *ledgerv1alpha1.RiskModel) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: map[string]string{labelServingName: model.Name},
-			Ports:    []corev1.ServicePort{{Name: "http", Port: model.Spec.Serving.Port, TargetPort: intstr.FromInt32(model.Spec.Serving.Port)}},
+			Ports: []corev1.ServicePort{
+				{Name: "http", Port: model.Spec.Serving.Port, TargetPort: intstr.FromInt32(model.Spec.Serving.Port)},
+				{Name: "metrics", Port: model.Spec.Serving.Port, TargetPort: intstr.FromInt32(model.Spec.Serving.Port)},
+			},
 		},
 	}
 }

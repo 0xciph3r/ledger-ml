@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ledger-ml-serving
+  namespace: system
+  labels:
+    app.kubernetes.io/name: ledger-ml
+    app.kubernetes.io/component: monitoring
+spec:
+  selector:
+    matchLabels:
+      ledger.ledgerml.io/component: serving
+  namespaceSelector:
+    any: true
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

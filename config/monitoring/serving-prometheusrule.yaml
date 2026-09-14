@@ -1,0 +1,36 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ledger-ml-serving
+  namespace: system
+  labels:
+    app.kubernetes.io/name: ledger-ml
+    app.kubernetes.io/component: monitoring
+spec:
+  groups:
+    - name: ledger-ml-serving
+      rules:
+        - alert: LedgerMLInferenceErrorRateHigh
+          expr: |
+            (
+              sum by (namespace, model_version) (
+                rate(ledgerml_inference_errors_total[10m])
+              )
+              /
+              clamp_min(
+                sum by (namespace, model_version) (
+                  rate(ledgerml_inference_requests_total[10m])
+                )
+                +
+                sum by (namespace, model_version) (
+                  rate(ledgerml_inference_errors_total[10m])
+                ),
+                0.001
+              )
+            ) > 0.05
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: Ledger ML inference error rate is high
+            description: Inference errors exceed 5% for model {{ $labels.model_version }}.
